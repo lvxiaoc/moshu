@@ -716,8 +716,12 @@ class LingmingLexiconIndex {
     const finalExact = scriptExact.length > 0 ? scriptExact : exact;
     const all = [...finalExact, ...predictions].slice(0, limit);
 
-    // Self-delimiting auto-commit when exact match is unique and no longer code extends the buffer
-    const shouldAutoCommit = finalExact.length === 1 && !hasLongerPrefix;
+    // Self-delimiting auto-commit only for unique full-code completions (short codes wait for Space)
+    const shouldAutoCommit =
+      finalExact.length === 1 &&
+      !hasLongerPrefix &&
+      finalExact[0].matchedBy === 'full' &&
+      buffer.length >= 3;
 
     return {
       exact: finalExact,

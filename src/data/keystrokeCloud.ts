@@ -10,8 +10,13 @@ import { PALACE_PDF_CHAMBERS } from './palacePdfData';
 const STORAGE_KEY = 'inkkey_keystroke_cloud_v1';
 const OPACITY_STORAGE_KEY = 'inkkey_keystroke_cloud_opacity_v1';
 const BLEND_STORAGE_KEY = 'inkkey_keystroke_cloud_blend_v1';
+const MODE_STORAGE_KEY = 'inkkey_keystroke_cloud_mode_v1';
+const SHORT_CODES_STORAGE_KEY = 'inkkey_keystroke_cloud_short_codes_v1';
 export const DEFAULT_CLOUD_OPACITY = 0.22;
 export const DEFAULT_CLOUD_BLEND = 0.65;
+export type CloudRenderMode = 'evolving' | 'palace';
+export const DEFAULT_CLOUD_MODE: CloudRenderMode = 'evolving';
+export const DEFAULT_CLOUD_INCLUDE_SHORT_CODES = true;
 
 export function loadKeystrokeCloudEnabled(): boolean {
   try {
@@ -78,6 +83,45 @@ export function saveKeystrokeCloudBlend(blend: number): void {
   }
 }
 
+export function loadKeystrokeCloudMode(): CloudRenderMode {
+  try {
+    const raw = localStorage.getItem(MODE_STORAGE_KEY);
+    if (raw === 'palace' || raw === 'evolving') {
+      return raw;
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return DEFAULT_CLOUD_MODE;
+}
+
+export function saveKeystrokeCloudMode(mode: CloudRenderMode): void {
+  try {
+    localStorage.setItem(MODE_STORAGE_KEY, mode);
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function loadKeystrokeCloudIncludeShortCodes(): boolean {
+  try {
+    const raw = localStorage.getItem(SHORT_CODES_STORAGE_KEY);
+    if (raw === 'false') return false;
+    if (raw === 'true') return true;
+  } catch {
+    // ignore storage errors
+  }
+  return DEFAULT_CLOUD_INCLUDE_SHORT_CODES;
+}
+
+export function saveKeystrokeCloudIncludeShortCodes(include: boolean): void {
+  try {
+    localStorage.setItem(SHORT_CODES_STORAGE_KEY, String(include));
+  } catch {
+    // ignore storage errors
+  }
+}
+
 export interface KeystrokeCloudContextValue {
   enabled: boolean;
   setEnabled: (next: boolean) => void;
@@ -86,6 +130,10 @@ export interface KeystrokeCloudContextValue {
   setOpacity: (next: number) => void;
   blend: number;
   setBlend: (next: number) => void;
+  mode: CloudRenderMode;
+  setMode: (next: CloudRenderMode) => void;
+  includeShortCodes: boolean;
+  setIncludeShortCodes: (next: boolean) => void;
 }
 
 export const KeystrokeCloudContext = createContext<KeystrokeCloudContextValue>({
@@ -96,6 +144,10 @@ export const KeystrokeCloudContext = createContext<KeystrokeCloudContextValue>({
   setOpacity: () => {},
   blend: DEFAULT_CLOUD_BLEND,
   setBlend: () => {},
+  mode: DEFAULT_CLOUD_MODE,
+  setMode: () => {},
+  includeShortCodes: DEFAULT_CLOUD_INCLUDE_SHORT_CODES,
+  setIncludeShortCodes: () => {},
 });
 
 export function useKeystrokeCloud(): KeystrokeCloudContextValue {

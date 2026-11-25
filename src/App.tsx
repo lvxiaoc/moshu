@@ -15,12 +15,17 @@ import {
   ThemeMode,
 } from './data/theme';
 import {
+  CloudRenderMode,
   KeystrokeCloudContext,
   loadKeystrokeCloudBlend,
   loadKeystrokeCloudEnabled,
+  loadKeystrokeCloudIncludeShortCodes,
+  loadKeystrokeCloudMode,
   loadKeystrokeCloudOpacity,
   saveKeystrokeCloudBlend,
   saveKeystrokeCloudEnabled,
+  saveKeystrokeCloudIncludeShortCodes,
+  saveKeystrokeCloudMode,
   saveKeystrokeCloudOpacity,
 } from './data/keystrokeCloud';
 import { MemoryPalaceCloud } from './components/MemoryPalaceCloud';
@@ -47,6 +52,12 @@ export default function App() {
   const [keystrokeCloudBlend, setKeystrokeCloudBlend] = useState<number>(() =>
     loadKeystrokeCloudBlend()
   );
+  const [keystrokeCloudMode, setKeystrokeCloudMode] = useState<CloudRenderMode>(() =>
+    loadKeystrokeCloudMode()
+  );
+  const [keystrokeCloudIncludeShortCodes, setKeystrokeCloudIncludeShortCodes] = useState<boolean>(
+    () => loadKeystrokeCloudIncludeShortCodes()
+  );
 
   const handleSetKeystrokeCloudEnabled = useCallback((next: boolean) => {
     setKeystrokeCloudEnabled(next);
@@ -63,6 +74,16 @@ export default function App() {
     const clamped = Math.max(0.05, Math.min(1.0, next));
     setKeystrokeCloudBlend(clamped);
     saveKeystrokeCloudBlend(clamped);
+  }, []);
+
+  const handleSetKeystrokeCloudMode = useCallback((next: CloudRenderMode) => {
+    setKeystrokeCloudMode(next);
+    saveKeystrokeCloudMode(next);
+  }, []);
+
+  const handleSetKeystrokeCloudIncludeShortCodes = useCallback((next: boolean) => {
+    setKeystrokeCloudIncludeShortCodes(next);
+    saveKeystrokeCloudIncludeShortCodes(next);
   }, []);
 
   const handleToggleKeystrokeCloud = useCallback(() => {
@@ -82,6 +103,10 @@ export default function App() {
       setOpacity: handleSetKeystrokeCloudOpacity,
       blend: keystrokeCloudBlend,
       setBlend: handleSetKeystrokeCloudBlend,
+      mode: keystrokeCloudMode,
+      setMode: handleSetKeystrokeCloudMode,
+      includeShortCodes: keystrokeCloudIncludeShortCodes,
+      setIncludeShortCodes: handleSetKeystrokeCloudIncludeShortCodes,
     }),
     [
       keystrokeCloudEnabled,
@@ -91,6 +116,10 @@ export default function App() {
       handleSetKeystrokeCloudOpacity,
       keystrokeCloudBlend,
       handleSetKeystrokeCloudBlend,
+      keystrokeCloudMode,
+      handleSetKeystrokeCloudMode,
+      keystrokeCloudIncludeShortCodes,
+      handleSetKeystrokeCloudIncludeShortCodes,
     ]
   );
 

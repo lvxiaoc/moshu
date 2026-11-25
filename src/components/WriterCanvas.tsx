@@ -20,10 +20,12 @@ import {
   mapChinesePunctuation,
   resolveImeDaSlot,
 } from '../engine/lingmingIme';
+import { LINGMING_CHAMBER_BY_KEY } from '../data/lingming';
 import { useKeystrokeCloud, useKeystrokeCloudPulse } from '../data/keystrokeCloud';
 import { SCRIPT_MODE_OPTIONS, ScriptMode } from '../data/scriptFilter';
 import { THEME_OPTIONS, ThemeMode, useThemeMode } from '../data/theme';
 import { useUiText } from '../data/uiScript';
+import { EvolvingProbCloud } from './EvolvingProbCloud';
 import { KeystrokePalaceCloud } from './KeystrokePalaceCloud';
 import { TouchPalaceKeyboard } from './TouchPalaceKeyboard';
 
@@ -254,8 +256,12 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
     setOpacity: setCloudOpacity,
     blend: cloudBlend,
     setBlend: setCloudBlend,
+    mode: cloudMode,
+    setMode: setCloudMode,
+    includeShortCodes: cloudIncludeShortCodes,
+    setIncludeShortCodes: setCloudIncludeShortCodes,
   } = useKeystrokeCloud();
-  const cloudPulse = useKeystrokeCloudPulse(keystrokeCloudEnabled);
+  const cloudPulse = useKeystrokeCloudPulse(keystrokeCloudEnabled && cloudMode === 'palace');
   const { trigger: triggerCloud, clear: clearCloud } = cloudPulse;
 
   const [store, setStore] = useState<DraftStore>(() => loadDraftStore());
@@ -267,6 +273,7 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
   const [caretPos, setCaretPos] = useState<number>(() => activeDraft.content.length);
   const [buffer, setBuffer] = useState<string>('');
   const [selectedIdx, setSelectedIdx] = useState<number>(0);
+  const [committedCloud, setCommittedCloud] = useState<{ char: string; tick: number } | null>(null);
   const [imeMode, setImeMode] = useState<'lingming' | 'passthrough'>(() => loadImeMode());
   const [showSoftKeyboard, setShowSoftKeyboard] = useState<boolean>(() => loadSoftKeyboard());
   const [chromeVisible, setChromeVisible] = useState<boolean>(true);
@@ -624,6 +631,11 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
     setCaretPos(snap.caretPos);
   }, [setLiveBuffer]);
 
+  const pulseCommittedCloud = useCallback((char: string) => {
+    if (!char) return;
+    setCommittedCloud((prev) => ({ char, tick: (prev?.tick ?? 0) + 1 }));
+  }, []);
+
   const commitCandidate = useCallback(
     (idx: number) => {
       const { buffer: curBuf } = liveRef.current;
@@ -632,13 +644,14 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
       const cand = res.all[idx] ?? res.all[0];
       if (cand) {
         synth.playKeyHit(curBuf.length || 1, true);
+        pulseCommittedCloud(cand.entry.char);
         insertTextAtCaret(cand.entry.char);
       } else {
         insertTextAtCaret(curBuf);
       }
       setLiveBuffer('', 0);
     },
-    [scriptMode, insertTextAtCaret, setLiveBuffer]
+    [scriptMode, insertTextAtCaret, setLiveBuffer, pulseCommittedCloud]
   );
 
   const moveCaretLine = useCallback((dir: -1 | 1) => {
@@ -694,15 +707,21 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
         const curRes = lingmingLexicon.query(baseBuffer, scriptMode, 7);
         const testRes = lingmingLexicon.query(baseBuffer + lowerKey, scriptMode, 7);
         const curExact = curRes.exact[curIdx] ?? curRes.exact[0];
-        const terminalMulti = !curRes.hasLongerPrefix && curRes.exact.length > 0;
+        const isFullCommitReady =
+          Boolean(curExact) && curExact.matchedBy === 'full' && baseBuffer.length >= 3;
+        const terminalMulti = !curRes.hasLongerPrefix && curRes.exact.length > 0 && isFullCommitReady;
         const maxCodeReached = baseBuffer.length >= 4 && Boolean(curExact);
-        const deadEndExtend = testRes.all.length === 0 && !testRes.hasLongerPrefix && Boolean(curExact);
+        const deadEndExtend =
+          testRes.all.length === 0 && !testRes.hasLongerPrefix && isFullCommitReady;
 
         if (terminalMulti || maxCodeReached || deadEndExtend) {
           textBefore += curExact.entry.char;
           baseBuffer = '';
           didDingZi = true;
-        } else if (baseBuffer.length >= 4) {
+        } else if (
+          baseBuffer.length >= 4 ||
+          (testRes.all.length === 0 && !testRes.hasLongerPrefix)
+        ) {
           baseBuffer = '';
         }
       }
@@ -716,6 +735,7 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
         if (daSlot) {
           triggerCloud(daSlot.chamberKey, daSlot.radical, 'hit');
         }
+        pulseCommittedCloud(committedChar);
         synth.playKeyHit(nextBuf.length, true);
         applyTextEdit(textBefore + committedChar + textAfter, textBefore.length + committedChar.length, true);
         setLiveBuffer('', 0);
@@ -736,7 +756,7 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
       }
       setLiveBuffer(nextBuf, 0);
     },
-    [scriptMode, triggerCloud, applyTextEdit, hideChromeImmediately, setLiveBuffer]
+    [scriptMode, triggerCloud, applyTextEdit, hideChromeImmediately, setLiveBuffer, pulseCommittedCloud]
   );
 
   const handleBackspaceAction = useCallback(() => {
@@ -786,6 +806,7 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
         const res = lingmingLexicon.query(curBuf, scriptMode, 7);
         const top = res.exact[curIdx] ?? res.all[0];
         const committed = top ? top.entry.char : curBuf;
+        if (top) pulseCommittedCloud(top.entry.char);
         insertTextAtCaret(committed + punct);
         setLiveBuffer('', 0);
       } else {
@@ -793,7 +814,7 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
       }
       synth.playKeyHit(1, true);
     },
-    [imeMode, scriptMode, insertTextAtCaret, setLiveBuffer]
+    [imeMode, scriptMode, insertTextAtCaret, setLiveBuffer, pulseCommittedCloud]
   );
 
   const processInputChar = useCallback(
@@ -1321,10 +1342,26 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
     return { paragraphSlices: out, activeParaIdx: foundIdx };
   }, [activeDraft.content, caretPos]);
 
-  // Subtle inline preview glyph at caret only while typing multi-key buffer (no bottom candidate bar)
+  // Subtle inline preview glyph at caret: prioritize structural radicals -> full-code progression;
+  // short-code words sit in the CW spiral and replace the target slot cleanly on Space.
   const inlineGhostChar = useMemo(() => {
     if (!buffer) return null;
-    const top = imeQuery.exact[selectedIdx] ?? imeQuery.all[0];
+    if (selectedIdx > 0) {
+      const picked = imeQuery.all[selectedIdx];
+      if (picked) return picked.entry.char;
+    }
+    if (buffer.length === 1) {
+      const chamber = LINGMING_CHAMBER_BY_KEY[buffer];
+      if (chamber) return chamber.primaryAnchor;
+    } else {
+      const exactFull = imeQuery.exact.find((c) => c.matchedBy === 'full');
+      if (exactFull) return exactFull.entry.char;
+      const structural = imeQuery.all.find(
+        (c) => c.matchedBy !== 'short' && c.entry.code.startsWith(buffer)
+      );
+      if (structural) return structural.entry.char;
+    }
+    const top = imeQuery.exact[0] ?? imeQuery.all[0];
     return top ? top.entry.char : null;
   }, [buffer, imeQuery.exact, imeQuery.all, selectedIdx]);
 
@@ -1334,8 +1371,8 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
     ? Math.max(220, Math.min(340, Math.round(Math.min(vvBox.width * 0.84, vvBox.height * 0.56))))
     : 460;
   const clampedCloudX = cloudAnchor
-    ? Math.max(cloudBoxPx * 0.34, Math.min(vvBox.width - cloudBoxPx * 0.34, cloudAnchor.x))
-    : vvBox.width / 2;
+    ? Math.max(cloudBoxPx * 0.12, Math.min(vvBox.width - cloudBoxPx * 0.78, cloudAnchor.x))
+    : vvBox.width * 0.38;
   const clampedCloudY = cloudAnchor
     ? Math.max(
         vvBox.offsetTop + cloudBoxPx * 0.34,
@@ -1525,7 +1562,7 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
             {cloudPopoverOpen && (
               <div
                 onClick={(e) => e.stopPropagation()}
-                className="absolute right-0 mt-1.5 w-64 rounded-xl border border-[var(--dojo-border-strong)] bg-[var(--dojo-surface)] wash:bg-[#F5F3EE] shadow-xl p-3 z-40 flex flex-col gap-3"
+                className="absolute right-0 mt-1.5 w-68 rounded-xl border border-[var(--dojo-border-strong)] bg-[var(--dojo-surface)] wash:bg-[#F5F3EE] shadow-xl p-3 z-40 flex flex-col gap-3"
               >
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-medium text-[var(--dojo-text-bright)]">
@@ -1547,7 +1584,68 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
                   </button>
                 </div>
 
-                <div className="flex flex-col gap-1.5">
+                <div className="flex flex-col gap-1.5 pt-2 border-t border-[var(--dojo-border)]">
+                  <span className="text-[11px] text-[var(--dojo-text-sub)]">
+                    {t('推演形態')}
+                  </span>
+                  <div className="grid grid-cols-2 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        synth.playClick();
+                        if (!keystrokeCloudEnabled) setKeystrokeCloudEnabled(true);
+                        setCloudMode('evolving');
+                      }}
+                      className={`py-1 rounded text-[11px] border cursor-pointer ${
+                        cloudMode === 'evolving'
+                          ? 'bg-[var(--dojo-ochre-wash)] border-[var(--dojo-ochre)]/45 text-[var(--dojo-ochre)] font-medium'
+                          : 'bg-[var(--dojo-surface-inset)] border-[var(--dojo-border)] text-[var(--dojo-text-muted)] hover:text-[var(--dojo-text)]'
+                      }`}
+                    >
+                      {t('機率演化')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        synth.playClick();
+                        if (!keystrokeCloudEnabled) setKeystrokeCloudEnabled(true);
+                        setCloudMode('palace');
+                      }}
+                      className={`py-1 rounded text-[11px] border cursor-pointer ${
+                        cloudMode === 'palace'
+                          ? 'bg-[var(--dojo-ochre-wash)] border-[var(--dojo-ochre)]/45 text-[var(--dojo-ochre)] font-medium'
+                          : 'bg-[var(--dojo-surface-inset)] border-[var(--dojo-border)] text-[var(--dojo-text-muted)] hover:text-[var(--dojo-text)]'
+                      }`}
+                    >
+                      {t('宮殿原圖')}
+                    </button>
+                  </div>
+
+                  {cloudMode === 'evolving' && (
+                    <div className="flex items-center justify-between pt-1 text-[11px]">
+                      <span className="text-[var(--dojo-text-sub)]">
+                        {t('計入簡碼推演')}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          synth.playClick();
+                          if (!keystrokeCloudEnabled) setKeystrokeCloudEnabled(true);
+                          setCloudIncludeShortCodes(!cloudIncludeShortCodes);
+                        }}
+                        className={`px-2 py-0.5 rounded border text-[11px] font-medium cursor-pointer ${
+                          cloudIncludeShortCodes
+                            ? 'bg-[var(--dojo-pine-wash)] border-[var(--dojo-pine)]/40 text-[var(--dojo-pine-text)]'
+                            : 'bg-[var(--dojo-surface-inset)] border-[var(--dojo-border)] text-[var(--dojo-text-muted)]'
+                        }`}
+                      >
+                        {t(cloudIncludeShortCodes ? '計入簡碼' : '純全碼')}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-2 border-t border-[var(--dojo-border)] flex flex-col gap-1.5">
                   <div className="flex items-center justify-between text-[11px] text-[var(--dojo-text-sub)]">
                     <span>{t('背景干擾度（色調濃淡）')}</span>
                     <span className="font-mono-tabular text-[var(--dojo-ochre)]">
@@ -1818,8 +1916,28 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
         </div>
       )}
 
-      {/* Whisper-faint Background Keystroke Memory Palace Cloud locked at focal caret */}
-      {keystrokeCloudEnabled && cloudAnchor && cloudPulse.pulse && (
+      {/* Whisper-faint Background Keystroke Cloud arranged to the right of the written text */}
+      {keystrokeCloudEnabled && cloudAnchor && cloudMode === 'evolving' && (
+        <EvolvingProbCloud
+          buffer={buffer}
+          committedChar={committedCloud?.char ?? null}
+          committedTick={committedCloud?.tick ?? 0}
+          scriptMode={scriptMode}
+          includeShortCodes={cloudIncludeShortCodes}
+          boxPx={cloudBoxPx}
+          opacityScale={cloudOpacity}
+          blendStrength={cloudBlend}
+          style={{
+            position: 'fixed',
+            left: `${clampedCloudX}px`,
+            top: `${clampedCloudY}px`,
+            transform: 'translate(-14%, -46%)',
+            zIndex: 15,
+          }}
+        />
+      )}
+
+      {keystrokeCloudEnabled && cloudAnchor && cloudMode === 'palace' && cloudPulse.pulse && (
         <KeystrokePalaceCloud
           pulse={cloudPulse.pulse}
           visible={cloudPulse.visible}
@@ -1833,7 +1951,7 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
             position: 'fixed',
             left: `${clampedCloudX}px`,
             top: `${clampedCloudY}px`,
-            transform: 'translate(-50%, -50%)',
+            transform: 'translate(-20%, -48%)',
             zIndex: 15,
           }}
         />
@@ -1916,15 +2034,10 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
                       data-ignored-caret="true"
                       className="relative inline-flex items-baseline align-baseline"
                     >
-                      {buffer && (
-                        <span className="inline-flex items-baseline gap-0.5 mx-0.5">
-                          {inlineGhostChar && (
-                            <span className="font-display text-[19px] sm:text-[22px] text-[var(--dojo-ochre)]/80 underline decoration-[var(--dojo-ochre)]/45 underline-offset-4">
-                              {inlineGhostChar}
-                            </span>
-                          )}
-                          <span className="font-mono-tabular text-[13px] sm:text-[14px] text-[var(--dojo-text-muted)]/75">
-                            {buffer}
+                      {buffer && inlineGhostChar && (
+                        <span className="inline-flex items-baseline mx-[1px]">
+                          <span className="font-display text-[19px] sm:text-[22px] text-[var(--dojo-ochre)]/80 underline decoration-[var(--dojo-ochre)]/45 underline-offset-4">
+                            {inlineGhostChar}
                           </span>
                         </span>
                       )}
