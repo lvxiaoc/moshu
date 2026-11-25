@@ -1,0 +1,442 @@
+@import "tailwindcss";
+
+@custom-variant wash (&:where([data-theme="wash"], [data-theme="wash"] *, .wash, .wash *));
+
+@layer base {
+  :root {
+    --font-display: 'Noto Serif TC', 'Source Han Serif TC', 'Songti TC', 'PMingLiU', 'SimSun', Georgia, serif;
+    --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'PingFang TC', 'PingFang SC', 'Microsoft JhengHei', 'Microsoft YaHei', sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+
+    /* Default: 玄墨夜練 (Night Ink Dojo) */
+    --dojo-canvas: #0b0f17;
+    --dojo-header: #0d1119;
+    --dojo-surface: #121722;
+    --dojo-surface-2: #181f2e;
+    --dojo-surface-inset: #0b0f17;
+    --dojo-text: #f2eee6;
+    --dojo-text-bright: #fff9ee;
+    --dojo-text-sub: #a0a8b8;
+    --dojo-text-muted: #70798a;
+    --dojo-border: rgba(242, 238, 230, 0.11);
+    --dojo-border-strong: rgba(242, 238, 230, 0.22);
+    --dojo-pine: #2ea87e;
+    --dojo-pine-text: #7ce5bc;
+    --dojo-pine-wash: rgba(46, 168, 126, 0.18);
+    --dojo-ochre: #d89b3c;
+    --dojo-ochre-wash: rgba(216, 155, 60, 0.18);
+    --dojo-crimson: #d94a38;
+    --dojo-crimson-hover: #e45643;
+    --dojo-crimson-text: #f07d6c;
+    --dojo-crimson-wash: rgba(217, 74, 56, 0.18);
+  }
+
+  :root[data-theme="wash"],
+  :root.wash {
+    /* 宣紙水墨 (Pure Monochromatic Xuan Paper & Sumi Ink Gradations) */
+    --dojo-canvas: #f3f1ec;
+    --dojo-header: #eceae3;
+    --dojo-surface: #e8e5dd;
+    --dojo-surface-2: #dedad0;
+    --dojo-surface-inset: #f8f7f3;
+    --dojo-text: #1c1c1a;
+    --dojo-text-bright: #0f0f0e;
+    --dojo-text-sub: #4c4c48;
+    --dojo-text-muted: #75756f;
+    --dojo-border: rgba(20, 20, 18, 0.14);
+    --dojo-border-strong: rgba(20, 20, 18, 0.30);
+    --dojo-pine: #242422;
+    --dojo-pine-text: #141413;
+    --dojo-pine-wash: rgba(20, 20, 18, 0.10);
+    --dojo-ochre: #444440;
+    --dojo-ochre-wash: rgba(20, 20, 18, 0.08);
+    --dojo-crimson: #181817;
+    --dojo-crimson-hover: #2d2d2a;
+    --dojo-crimson-text: #141413;
+    --dojo-crimson-wash: rgba(20, 20, 18, 0.12);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-sans);
+    background-color: var(--dojo-canvas);
+    color: var(--dojo-text);
+    transition: background-color 220ms ease, color 220ms ease;
+  }
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.font-mono-tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Tactile mechanical keycap press and subtle motion */
+.keycap-surface {
+  transition: transform 75ms cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 160ms cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 140ms ease,
+              background-color 140ms ease;
+}
+
+@keyframes inkWashReveal {
+  0% {
+    opacity: 0;
+    transform: scale(1.035);
+    filter: blur(6px);
+  }
+  60% {
+    opacity: 0.92;
+    transform: scale(1.004);
+    filter: blur(0.8px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0px);
+  }
+}
+
+@keyframes inkWashSlideUp {
+  0% {
+    opacity: 0;
+    transform: translateY(6px) scale(1.015);
+    filter: blur(5px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0px);
+  }
+}
+
+@keyframes inkAuraFade {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(0.36, 0.32) rotate(-7deg);
+    border-radius: 47% 53% 57% 43% / 53% 45% 55% 47%;
+    filter: blur(2px);
+  }
+  22% {
+    opacity: 0.92;
+    transform: translate3d(1px, -1px, 0) scale(1.06, 0.94) rotate(2deg);
+    border-radius: 61% 39% 46% 54% / 42% 58% 49% 51%;
+    filter: blur(5px);
+  }
+  58% {
+    opacity: 0.56;
+    transform: translate3d(-1.5px, 1.5px, 0) scale(1.56, 1.44) rotate(7deg);
+    border-radius: 38% 62% 56% 44% / 59% 41% 62% 38%;
+    filter: blur(10px);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(2px, 2.5px, 0) scale(2.08, 1.88) rotate(12deg);
+    border-radius: 54% 46% 40% 60% / 45% 55% 48% 52%;
+    filter: blur(16px);
+  }
+}
+
+@keyframes inkAuraSlow {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(0.42, 0.46) rotate(6deg);
+    border-radius: 56% 44% 48% 52% / 44% 56% 52% 48%;
+    filter: blur(4px);
+  }
+  28% {
+    opacity: 0.72;
+    transform: translate3d(-2px, 1px, 0) scale(1.18, 1.12) rotate(-3deg);
+    border-radius: 41% 59% 53% 47% / 57% 43% 46% 54%;
+    filter: blur(8px);
+  }
+  64% {
+    opacity: 0.38;
+    transform: translate3d(2px, -1.5px, 0) scale(1.78, 1.66) rotate(-8deg);
+    border-radius: 60% 40% 44% 56% / 46% 54% 60% 40%;
+    filter: blur(13px);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(-2.5px, 2px, 0) scale(2.38, 2.16) rotate(-14deg);
+    border-radius: 46% 54% 58% 42% / 52% 48% 42% 58%;
+    filter: blur(19px);
+  }
+}
+
+@keyframes inkDropletFall {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -24px, 0) scale(0.48, 1.48);
+    border-radius: 50% 50% 52% 48% / 62% 62% 38% 38%;
+    filter: blur(0.4px);
+  }
+  16% {
+    opacity: 0.96;
+    transform: translate3d(0, -6px, 0) scale(0.66, 1.24);
+    border-radius: 50% 50% 50% 50% / 58% 58% 42% 42%;
+    filter: blur(0.6px);
+  }
+  30% {
+    opacity: 0.88;
+    transform: translate3d(0, 1px, 0) scale(1.36, 0.68);
+    border-radius: 58% 42% 48% 52% / 46% 54% 52% 48%;
+    filter: blur(1.8px);
+  }
+  58% {
+    opacity: 0.44;
+    transform: translate3d(0, 0.5px, 0) scale(2.12, 1.66) rotate(5deg);
+    border-radius: 43% 57% 55% 45% / 54% 46% 58% 42%;
+    filter: blur(5.5px);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(2.85, 2.45) rotate(11deg);
+    border-radius: 55% 45% 42% 58% / 47% 53% 46% 54%;
+    filter: blur(11px);
+  }
+}
+
+@keyframes inkTendrilSpread {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(0.32) rotate(0deg);
+    border-radius: 52% 48% 45% 55% / 48% 52% 56% 44%;
+    filter: blur(1.2px);
+  }
+  24% {
+    opacity: 0.78;
+    transform: translate3d(calc(var(--ink-tx, 0px) * 0.48), calc(var(--ink-ty, 0px) * 0.48), 0)
+      scale(var(--ink-scale, 1)) rotate(calc(var(--ink-rot, 0deg) * 0.5));
+    border-radius: 63% 37% 52% 48% / 41% 59% 46% 54%;
+    filter: blur(2.6px);
+  }
+  65% {
+    opacity: 0.36;
+    transform: translate3d(calc(var(--ink-tx, 0px) * 0.88), calc(var(--ink-ty, 0px) * 0.88), 0)
+      scale(calc(var(--ink-scale, 1) * 1.42)) rotate(var(--ink-rot, 0deg));
+    border-radius: 40% 60% 47% 53% / 58% 42% 55% 45%;
+    filter: blur(5.5px);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--ink-tx, 0px), var(--ink-ty, 0px), 0)
+      scale(calc(var(--ink-scale, 1) * 1.78)) rotate(calc(var(--ink-rot, 0deg) * 1.3));
+    border-radius: 54% 46% 60% 40% / 46% 54% 42% 58%;
+    filter: blur(9px);
+  }
+}
+
+@keyframes inkMistDrift {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: translate3d(1.2%, -1%, 0) scale(1.03);
+    opacity: 1;
+  }
+}
+
+/* Global Xuan-paper fiber grain + ambient corner ink washes (pure monochrome sumi ink in wash theme) */
+.dojo-ink-paper-bg {
+  background-color: #f3f1ec;
+  background-image:
+    radial-gradient(ellipse 52% 46% at 8% 12%, rgba(20, 20, 18, 0.075) 0%, rgba(64, 64, 60, 0.028) 44%, transparent 74%),
+    radial-gradient(ellipse 48% 42% at 92% 88%, rgba(28, 28, 26, 0.062) 0%, rgba(96, 96, 90, 0.028) 46%, transparent 76%),
+    radial-gradient(ellipse 38% 34% at 84% 14%, rgba(56, 56, 52, 0.045) 0%, transparent 70%),
+    radial-gradient(ellipse 42% 38% at 14% 86%, rgba(20, 20, 18, 0.052) 0%, transparent 72%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23p)' opacity='0.04'/%3E%3C/svg%3E");
+}
+
+.dojo-ink-mist-layer {
+  animation: inkMistDrift 16s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+[data-theme="wash"] .wash-enter,
+.wash .wash-enter {
+  animation: inkWashReveal 440ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+[data-theme="wash"] .wash-enter-soft,
+.wash .wash-enter-soft {
+  animation: inkWashSlideUp 460ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ==================== Xuan-Paper Ink Absorption Typography (.wash) ==================== */
+/* Grayscale antialiasing eliminates colored subpixel fringing; subtle SVG fractal-noise   */
+/* displacement + capillary shadow mimics sumi ink gently soaking into Xuan paper fibers.  */
+:where([data-theme="wash"], .wash) {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-optical-sizing: auto;
+  font-kerning: normal;
+  font-synthesis-weight: none;
+}
+
+:where([data-theme="wash"], .wash) :is(
+  p,
+  a,
+  li,
+  dt,
+  dd,
+  th,
+  td,
+  label,
+  strong,
+  em,
+  small,
+  blockquote,
+  code,
+  kbd,
+  textarea,
+  input
+) {
+  text-shadow:
+    0 0 0.65px rgba(20, 20, 18, 0.26),
+    0 0 1.9px rgba(20, 20, 18, 0.085);
+  filter: url(#wash-ink-bleed-soft);
+}
+
+:where([data-theme="wash"], .wash) span:not([aria-hidden="true"]):not(.ink-aura-fade):not(.ink-aura-slow):not(.ink-droplet-fall):not(.ink-tendril-spread) {
+  text-shadow:
+    0 0 0.6px rgba(20, 20, 18, 0.24),
+    0 0 1.7px rgba(20, 20, 18, 0.08);
+  filter: url(#wash-ink-bleed-soft);
+}
+
+:where([data-theme="wash"], .wash) :is(h1, h2, h3, h4, h5, h6, .font-display) {
+  text-shadow:
+    0 0 0.95px rgba(16, 16, 15, 0.34),
+    0 0 2.8px rgba(18, 18, 17, 0.13);
+  filter: url(#wash-ink-bleed-display);
+}
+
+:where([data-theme="wash"], .wash) svg text {
+  text-rendering: geometricPrecision;
+  filter: url(#wash-ink-bleed-display);
+}
+
+/* Keep light-on-dark sumi-seal button text crisp without dark outer halo */
+:where([data-theme="wash"], .wash) :is(.text-white, [class*="text-white/"], [class*="text-[#F8F7F3]"]),
+:where([data-theme="wash"], .wash) :is(.text-white, [class*="text-white/"], [class*="text-[#F8F7F3]"]) span:not([aria-hidden="true"]),
+:where([data-theme="wash"], .wash) :is(.text-white, [class*="text-white/"], [class*="text-[#F8F7F3]"]) :is(strong, em) {
+  text-shadow: 0 0 0.7px rgba(248, 247, 243, 0.24);
+  filter: url(#wash-ink-bleed-soft);
+}
+
+/* Avoid compounding nested SVG filters on children inside already-filtered text blocks */
+:where([data-theme="wash"], .wash) :is(p, li, td, th, label, h1, h2, h3, h4, .font-display) :is(span, strong, em, a, code) {
+  filter: none;
+}
+
+.ink-aura-fade {
+  animation: inkAuraFade 780ms cubic-bezier(0.18, 0.88, 0.28, 1) forwards;
+  will-change: transform, opacity, filter, border-radius;
+}
+
+.ink-aura-slow {
+  animation: inkAuraSlow 960ms cubic-bezier(0.16, 0.84, 0.3, 1) forwards;
+  will-change: transform, opacity, filter, border-radius;
+}
+
+[data-theme="wash"] .ink-aura-fade,
+.wash .ink-aura-fade {
+  mix-blend-mode: multiply;
+}
+
+[data-theme="wash"] .ink-aura-slow,
+.wash .ink-aura-slow {
+  mix-blend-mode: multiply;
+}
+
+.ink-droplet-fall {
+  animation: inkDropletFall 640ms cubic-bezier(0.2, 0.86, 0.28, 1) forwards;
+  will-change: transform, opacity, filter, border-radius;
+  mix-blend-mode: multiply;
+}
+
+.ink-tendril-spread {
+  animation: inkTendrilSpread 820ms cubic-bezier(0.16, 0.86, 0.26, 1) forwards;
+  will-change: transform, opacity, filter, border-radius;
+  mix-blend-mode: multiply;
+}
+
+@keyframes palaceTooltipReveal {
+  0% {
+    opacity: 0;
+    transform: translateY(4px) scale(0.985);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes palaceStrokeDraw {
+  0% {
+    stroke-dashoffset: 1;
+    opacity: 0.25;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+}
+
+.palace-tooltip-enter {
+  animation: palaceTooltipReveal 170ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.palace-stroke-draw {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+  animation: palaceStrokeDraw 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes writerCaretBlink {
+  0%, 49% {
+    opacity: 1;
+  }
+  50%, 100% {
+    opacity: 0.22;
+  }
+}
+
+.writer-caret-blink {
+  animation: writerCaretBlink 1.1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .keycap-surface {
+    transition: none;
+  }
+  .dojo-ink-mist-layer,
+  [data-theme="wash"] .wash-enter,
+  [data-theme="wash"] .wash-enter-soft,
+  .ink-aura-fade,
+  .ink-aura-slow,
+  .ink-droplet-fall,
+  .ink-tendril-spread,
+  .palace-tooltip-enter,
+  .palace-stroke-draw,
+  .writer-caret-blink {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+

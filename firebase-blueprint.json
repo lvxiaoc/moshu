@@ -1,0 +1,123 @@
+{
+  "entities": {
+    "CorrectionReport": {
+      "title": "CorrectionReport",
+      "description": "User-submitted code-table, radical decomposition, or stroke-root coloring error report for Lingming input method characters.",
+      "type": "object",
+      "properties": {
+        "char": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4,
+          "description": "Target Chinese character or glyph with an error."
+        },
+        "issueType": {
+          "type": "string",
+          "enum": [
+            "stroke_color",
+            "radical_split",
+            "code_error",
+            "short_code",
+            "other"
+          ],
+          "description": "Category of the code-table or decomposition defect."
+        },
+        "currentCode": {
+          "type": "string",
+          "maxLength": 16,
+          "description": "Current full code shown in the app (may be empty if unlisted)."
+        },
+        "suggestedCode": {
+          "type": "string",
+          "maxLength": 16,
+          "description": "Reporter's suggested full or short code correction."
+        },
+        "currentRoots": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Current radical sequence displayed in the app."
+        },
+        "suggestedRoots": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Reporter's suggested radical sequence."
+        },
+        "suggestedStrokeIndices": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Optional comma-separated stroke-to-root index array (e.g., 0,0,1,1,-1,2)."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Concise explanation of the decomposition or coding error."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "reviewed",
+            "resolved"
+          ],
+          "description": "Lifecycle status of the report. Always starts as open; terminal resolved state is admin-only."
+        },
+        "reporterUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the reporting user."
+        },
+        "reporterName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Public display name of the reporter (no email or private PII)."
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "home",
+            "huangting"
+          ],
+          "description": "Entry surface where the report was submitted."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Immutable server creation timestamp (must equal request.time on create)."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last-updated timestamp (must equal request.time on every write)."
+        }
+      },
+      "required": [
+        "char",
+        "issueType",
+        "currentCode",
+        "suggestedCode",
+        "currentRoots",
+        "suggestedRoots",
+        "suggestedStrokeIndices",
+        "description",
+        "status",
+        "reporterUid",
+        "reporterName",
+        "source",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/correctionReports/{reportId}": {
+      "schema": {
+        "$ref": "#/entities/CorrectionReport"
+      },
+      "description": "Collection of user-submitted Lingming code-table and decomposition correction reports."
+    }
+  }
+}

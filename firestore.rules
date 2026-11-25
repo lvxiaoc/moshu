@@ -1,0 +1,167 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Global Safety Net (Default-Deny Catch-All)
+    // ===============================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ===============================================================
+    // Reusable Hardened Security Primitives
+    // ===============================================================
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    // Bootstrapped admin (strictly requires verified email to prevent email spoofing)
+    function isAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'harryli@gmail.com';
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidIssueType(val) {
+      return val in ['stroke_color', 'radical_split', 'code_error', 'short_code', 'other'];
+    }
+
+    function isValidStatus(val) {
+      return val in ['open', 'reviewed', 'resolved'];
+    }
+
+    function isValidSource(val) {
+      return val in ['home', 'huangting'];
+    }
+
+    // ===============================================================
+    // Entity Validation Blueprint: CorrectionReport
+    // ===============================================================
+    function isValidCorrectionReport(data) {
+      return data.keys().hasAll([
+          'char',
+          'issueType',
+          'currentCode',
+          'suggestedCode',
+          'currentRoots',
+          'suggestedRoots',
+          'suggestedStrokeIndices',
+          'description',
+          'status',
+          'reporterUid',
+          'reporterName',
+          'source',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'char',
+          'issueType',
+          'currentCode',
+          'suggestedCode',
+          'currentRoots',
+          'suggestedRoots',
+          'suggestedStrokeIndices',
+          'description',
+          'status',
+          'reporterUid',
+          'reporterName',
+          'source',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.char is string && data.char.size() >= 1 && data.char.size() <= 4
+        && data.issueType is string && isValidIssueType(data.issueType)
+        && data.currentCode is string && data.currentCode.size() <= 16
+        && data.suggestedCode is string && data.suggestedCode.size() <= 16
+        && data.currentRoots is string && data.currentRoots.size() <= 64
+        && data.suggestedRoots is string && data.suggestedRoots.size() <= 64
+        && data.suggestedStrokeIndices is string && data.suggestedStrokeIndices.size() <= 120
+        && data.description is string && data.description.size() >= 1 && data.description.size() <= 500
+        && data.status is string && isValidStatus(data.status)
+        && isValidId(data.reporterUid)
+        && (data.reporterUid == request.auth.uid || isAdmin())
+        && data.reporterName is string && data.reporterName.size() >= 1 && data.reporterName.size() <= 80
+        && data.source is string && isValidSource(data.source)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Action-Based Update Helpers for /correctionReports/{reportId}
+    function isReporterEditAction() {
+      return existing().reporterUid == request.auth.uid
+        && existing().status == 'open'
+        && incoming().status == 'open'
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'issueType',
+          'suggestedCode',
+          'suggestedRoots',
+          'suggestedStrokeIndices',
+          'description',
+          'updatedAt'
+        ]);
+    }
+
+    function isAdminReviewAction() {
+      return isAdmin()
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'status',
+          'updatedAt'
+        ]);
+    }
+
+    // ===============================================================
+    // Collection: /correctionReports/{reportId}
+    // ===============================================================
+    match /correctionReports/{reportId} {
+      allow get: if isVerifiedUser()
+        && isValidId(reportId)
+        && (existing().reporterUid == request.auth.uid || isAdmin());
+
+      // Secure List Query: explicitly evaluates resource.data (no get()/exists(), no client trust)
+      allow list: if isVerifiedUser()
+        && (existing().reporterUid == request.auth.uid || isAdmin());
+
+      allow create: if isVerifiedUser()
+        && isValidId(reportId)
+        && isValidCorrectionReport(incoming())
+        && incoming().reporterUid == request.auth.uid
+        && incoming().status == 'open'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(reportId)
+        && isValidCorrectionReport(incoming())
+        && incoming().reporterUid == existing().reporterUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isReporterEditAction()
+          || isAdminReviewAction()
+        );
+
+      allow delete: if isVerifiedUser()
+        && isValidId(reportId)
+        && (
+          (existing().reporterUid == request.auth.uid && existing().status == 'open')
+          || isAdmin()
+        );
+    }
+  }
+}
