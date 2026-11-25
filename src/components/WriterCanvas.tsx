@@ -693,15 +693,17 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
       if (baseBuffer.length > 0) {
         const curRes = lingmingLexicon.query(baseBuffer, scriptMode, 7);
         const testRes = lingmingLexicon.query(baseBuffer + lowerKey, scriptMode, 7);
-        const curBest = curRes.exact[curIdx] ?? curRes.exact[0] ?? curRes.all[0];
+        const curExact = curRes.exact[curIdx] ?? curRes.exact[0];
         const terminalMulti = !curRes.hasLongerPrefix && curRes.exact.length > 0;
-        const maxCodeReached = baseBuffer.length >= 4 && Boolean(curBest);
-        const deadEndExtend = testRes.all.length === 0 && !testRes.hasLongerPrefix && Boolean(curBest);
+        const maxCodeReached = baseBuffer.length >= 4 && Boolean(curExact);
+        const deadEndExtend = testRes.all.length === 0 && !testRes.hasLongerPrefix && Boolean(curExact);
 
         if (terminalMulti || maxCodeReached || deadEndExtend) {
-          textBefore += curBest.entry.char;
+          textBefore += curExact.entry.char;
           baseBuffer = '';
           didDingZi = true;
+        } else if (baseBuffer.length >= 4) {
+          baseBuffer = '';
         }
       }
 

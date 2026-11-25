@@ -53,6 +53,9 @@ const COMMON_WRITER_SPLITS: Array<{
   char: string;
   roots: string[];
   script: CharScript;
+  code?: string;
+  rootCodes?: string[];
+  roles?: CodeRole[];
 }> = [
   { char: '我', roots: ['丿', '扌', '戈'], script: 'common' },
   { char: '你', roots: ['亻', '勹', '小'], script: 'common' },
@@ -154,14 +157,14 @@ const COMMON_WRITER_SPLITS: Array<{
   { char: '忙', roots: ['忄', '亡'], script: 'common' },
   { char: '盲', roots: ['亡', '目'], script: 'common' },
   { char: '亡', roots: ['亡'], script: 'common' },
-  { char: '情', roots: ['忄', '丰', '月'], script: 'common' },
-  { char: '靜', roots: ['丰', '月', '爪', '亅'], script: 'trad' },
-  { char: '静', roots: ['丰', '月', '刀', '亅'], script: 'simp' },
-  { char: '晴', roots: ['日', '丰', '月'], script: 'common' },
-  { char: '精', roots: ['米', '丰', '月'], script: 'common' },
-  { char: '請', roots: ['言', '丰', '月'], script: 'trad' },
-  { char: '请', roots: ['讠', '丰', '月'], script: 'simp' },
-  { char: '青', roots: ['丰', '月'], script: 'common' },
+  { char: '情', roots: ['忄', '', '月'], rootCodes: ['mi', 'se', 'le'], code: 'msle', roles: ['da', 'da', 'da', 'yun'], script: 'common' },
+  { char: '靜', roots: ['', '月', '爪', '亅'], rootCodes: ['se', 'le', 'ma', 'wi'], code: 'slmw', roles: ['da', 'da', 'da', 'da'], script: 'trad' },
+  { char: '静', roots: ['', '月', '⺈', '亅'], rootCodes: ['se', 'le', 'bi', 'wi'], code: 'slbw', roles: ['da', 'da', 'da', 'da'], script: 'simp' },
+  { char: '晴', roots: ['日', '', '月'], rootCodes: ['hri', 'se', 'le'], code: 'hrsl', roles: ['da', 'sheng', 'da', 'da'], script: 'common' },
+  { char: '精', roots: ['米', '', '月'], rootCodes: ['vmi', 'se', 'le'], code: 'vmsl', roles: ['da', 'sheng', 'da', 'da'], script: 'common' },
+  { char: '請', roots: ['言', '', '月'], rootCodes: ['ra', 'se', 'le'], code: 'rsle', roles: ['da', 'da', 'da', 'yun'], script: 'trad' },
+  { char: '请', roots: ['讠', '', '月'], rootCodes: ['wa', 'se', 'le'], code: 'wsle', roles: ['da', 'da', 'da', 'yun'], script: 'simp' },
+  { char: '青', roots: ['', '月'], rootCodes: ['se', 'le'], code: 'sle', roles: ['da', 'da', 'yun'], script: 'common' },
   { char: '快', roots: ['忄', '乙', '大'], script: 'common' },
   { char: '慢', roots: ['忄', '日', '罒', '又'], script: 'common' },
   { char: '苦', roots: ['艹', '古'], script: 'common' },
@@ -288,7 +291,7 @@ const COMMON_WRITER_SPLITS: Array<{
   { char: '法', roots: ['氵', '土', '厶'], script: 'common' },
   { char: '治', roots: ['氵', '厶', '口'], script: 'common' },
   { char: '活', roots: ['氵', '舌'], script: 'common' },
-  { char: '清', roots: ['氵', '丰', '月'], script: 'common' },
+  { char: '清', roots: ['氵', '', '月'], rootCodes: ['vi', 'se', 'le'], code: 'vsle', roles: ['da', 'da', 'da', 'yun'], script: 'common' },
   { char: '濁', roots: ['氵', '罒', '勹', '虫'], script: 'trad' },
   { char: '浊', roots: ['氵', '虫'], script: 'simp' },
   { char: '松', roots: ['木', '八', '厶'], script: 'common' },
@@ -559,7 +562,7 @@ class LingmingLexiconIndex {
         roots,
         rootCodes,
         script: getLingmingCharScript(char),
-        priority: 420,
+        priority: 640,
       });
     }
 
@@ -582,6 +585,18 @@ class LingmingLexiconIndex {
     // 4. Common everyday Traditional & Simplified writer splits
     for (let i = 0; i < COMMON_WRITER_SPLITS.length; i++) {
       const item = COMMON_WRITER_SPLITS[i];
+      if (item.code && item.rootCodes) {
+        upsert({
+          char: item.char,
+          code: item.code,
+          roots: item.roots,
+          rootCodes: item.rootCodes,
+          roles: item.roles,
+          script: item.script === 'common' ? getLingmingCharScript(item.char) : item.script,
+          priority: 560 - Math.min(200, Math.floor(i / 2)),
+        });
+        continue;
+      }
       if (item.roots.some((r) => !LINGMING_ROOT_MAP.has(r))) continue;
       const enc = encodeLingmingRoots(item.roots);
       if (!enc.code) continue;
