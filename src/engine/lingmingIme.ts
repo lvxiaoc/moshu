@@ -716,15 +716,22 @@ class LingmingLexiconIndex {
     const finalExact = scriptExact.length > 0 ? scriptExact : exact;
     const all = [...finalExact, ...predictions].slice(0, limit);
 
-    // Self-delimiting auto-commit only for unique full-code completions (short codes wait for Space)
+    // 靈明形碼「自分割／自定界」規則：
+    // 韻母（a/e/i/o/u）只可能出現於單字編碼末碼，擊入韻母即完結當前字編碼；
+    // 若非字根後備項與真實漢字撞碼，優先以唯一真實漢字自動確定上屏；
+    // 四碼全碼且無更長前綴時亦自動確定上屏。
+    const endsWithVowel = /[aeiou]$/.test(buffer);
+    const nonRadicalExact = finalExact.filter((c) => !c.entry.isRadical);
+    const effectiveExact = nonRadicalExact.length > 0 ? nonRadicalExact : finalExact;
     const shouldAutoCommit =
-      finalExact.length === 1 &&
       !hasLongerPrefix &&
-      finalExact[0].matchedBy === 'full' &&
-      buffer.length >= 3;
+      effectiveExact.length === 1 &&
+      (endsWithVowel || (effectiveExact[0].matchedBy === 'full' && buffer.length >= 4));
 
     return {
-      exact: finalExact,
+      exact: effectiveExact.length > 0 && effectiveExact.length < finalExact.length
+        ? [...effectiveExact, ...finalExact.filter((c) => c.entry.isRadical)]
+        : finalExact,
       predictions,
       all,
       hasLongerPrefix,

@@ -468,42 +468,52 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
   }, [imeQuery.all.length, selectedIdx]);
 
   // Snap active caret line onto the lower-middle focal baseline
-  const snapCaretToFocalBaseline = useCallback((behavior: ScrollBehavior = 'auto') => {
-    const scroller = scrollContainerRef.current;
-    const rule = focalRuleRef.current;
-    const marker = caretMarkerRef.current;
-    if (!scroller || !rule || !marker) return;
-
-    const ruleRect = rule.getBoundingClientRect();
-    const markerRect = marker.getBoundingClientRect();
-    const targetBottom = ruleRect.top - 10;
-    const delta = markerRect.bottom - targetBottom;
-
-    if (Math.abs(delta) > 1.5) {
-      isAutoScrollingRef.current = true;
-      scroller.scrollBy({ top: delta, behavior });
-      window.setTimeout(() => {
-        isAutoScrollingRef.current = false;
-      }, 60);
-    }
-
-    const updatedRect = marker.getBoundingClientRect();
+  const syncCloudAnchorFromMarker = useCallback((rect: DOMRect) => {
+    const hasComposingGlyph = Boolean(liveRef.current.buffer) && rect.width > 8;
+    const centerX = hasComposingGlyph
+      ? rect.left + Math.min(11, rect.width * 0.44)
+      : rect.left;
     setCloudAnchor({
-      x: updatedRect.left,
-      y: updatedRect.top + updatedRect.height / 2,
+      x: centerX,
+      y: rect.top + rect.height / 2,
     });
-    if (inputSinkRef.current) {
-      inputSinkRef.current.style.left = `${Math.max(12, Math.min(window.innerWidth - 40, updatedRect.left))}px`;
-      inputSinkRef.current.style.top = `${Math.max(12, Math.min(window.innerHeight - 40, updatedRect.bottom))}px`;
-    }
   }, []);
+
+  const snapCaretToFocalBaseline = useCallback(
+    (behavior: ScrollBehavior = 'auto') => {
+      const scroller = scrollContainerRef.current;
+      const rule = focalRuleRef.current;
+      const marker = caretMarkerRef.current;
+      if (!scroller || !rule || !marker) return;
+
+      const ruleRect = rule.getBoundingClientRect();
+      const markerRect = marker.getBoundingClientRect();
+      const targetBottom = ruleRect.top - 10;
+      const delta = markerRect.bottom - targetBottom;
+
+      if (Math.abs(delta) > 1.5) {
+        isAutoScrollingRef.current = true;
+        scroller.scrollBy({ top: delta, behavior });
+        window.setTimeout(() => {
+          isAutoScrollingRef.current = false;
+        }, 60);
+      }
+
+      const updatedRect = marker.getBoundingClientRect();
+      syncCloudAnchorFromMarker(updatedRect);
+      if (inputSinkRef.current) {
+        inputSinkRef.current.style.left = `${Math.max(12, Math.min(window.innerWidth - 40, updatedRect.left))}px`;
+        inputSinkRef.current.style.top = `${Math.max(12, Math.min(window.innerHeight - 40, updatedRect.bottom))}px`;
+      }
+    },
+    [syncCloudAnchorFromMarker]
+  );
 
   useEffect(() => {
     if (!userScrolledAwayRef.current) {
       snapCaretToFocalBaseline('auto');
     } else if (caretMarkerRef.current) {
-      const r = caretMarkerRef.current.getBoundingClientRect();
-      setCloudAnchor({ x: r.left, y: r.top + r.height / 2 });
+      syncCloudAnchorFromMarker(caretMarkerRef.current.getBoundingClientRect());
     }
   }, [
     activeDraft.content,
@@ -513,6 +523,7 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
     vvBox.height,
     showSoftKeyboard,
     snapCaretToFocalBaseline,
+    syncCloudAnchorFromMarker,
   ]);
 
   const applyTextEdit = useCallback(
@@ -707,12 +718,11 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
         const curRes = lingmingLexicon.query(baseBuffer, scriptMode, 7);
         const testRes = lingmingLexicon.query(baseBuffer + lowerKey, scriptMode, 7);
         const curExact = curRes.exact[curIdx] ?? curRes.exact[0];
-        const isFullCommitReady =
-          Boolean(curExact) && curExact.matchedBy === 'full' && baseBuffer.length >= 3;
-        const terminalMulti = !curRes.hasLongerPrefix && curRes.exact.length > 0 && isFullCommitReady;
-        const maxCodeReached = baseBuffer.length >= 4 && Boolean(curExact);
+        const isCommitReady = Boolean(curExact);
+        const terminalMulti = !curRes.hasLongerPrefix && isCommitReady;
+        const maxCodeReached = baseBuffer.length >= 4 && isCommitReady;
         const deadEndExtend =
-          testRes.all.length === 0 && !testRes.hasLongerPrefix && isFullCommitReady;
+          testRes.all.length === 0 && !testRes.hasLongerPrefix && isCommitReady;
 
         if (terminalMulti || maxCodeReached || deadEndExtend) {
           textBefore += curExact.entry.char;
@@ -728,12 +738,19 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
 
       const nextBuf = baseBuffer + lowerKey;
       const nextRes = lingmingLexicon.query(nextBuf, scriptMode, 7);
-      const daSlot = resolveImeDaSlot(nextRes.all[0], nextBuf, nextBuf.length - 1);
+      const structuralTop =
+        nextRes.all.find((c) => c.matchedBy !== 'short' && c.entry.code.startsWith(nextBuf)) ??
+        nextRes.all[0];
+      const daSlot = resolveImeDaSlot(structuralTop, nextBuf, nextBuf.length - 1);
+      const activeRadical =
+        nextBuf.length === 1
+          ? LINGMING_CHAMBER_BY_KEY[nextBuf]?.primaryAnchor ?? daSlot?.radical ?? null
+          : daSlot?.radical ?? null;
 
       if (nextRes.shouldAutoCommit) {
         const committedChar = nextRes.exact[0].entry.char;
         if (daSlot) {
-          triggerCloud(daSlot.chamberKey, daSlot.radical, 'hit');
+          triggerCloud(daSlot.chamberKey, activeRadical, 'hit', undefined, 950);
         }
         pulseCommittedCloud(committedChar);
         synth.playKeyHit(nextBuf.length, true);
@@ -743,7 +760,7 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
       }
 
       if (daSlot) {
-        triggerCloud(daSlot.chamberKey, daSlot.radical, 'hit');
+        triggerCloud(daSlot.chamberKey, activeRadical, 'hit', undefined, 16000);
       }
       synth.playKeyHit(nextBuf.length, false);
 
@@ -764,12 +781,30 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
     if (curBuf) {
       const next = curBuf.slice(0, -1);
       setLiveBuffer(next, 0);
-      if (!next) clearCloud();
+      if (!next) {
+        clearCloud();
+      } else {
+        const nextRes = lingmingLexicon.query(next, scriptMode, 7);
+        const structuralTop =
+          nextRes.all.find((c) => c.matchedBy !== 'short' && c.entry.code.startsWith(next)) ??
+          nextRes.all[0];
+        let daSlot = resolveImeDaSlot(structuralTop, next, next.length - 1);
+        if (!daSlot && next.length > 1) {
+          daSlot = resolveImeDaSlot(structuralTop, next, 0);
+        }
+        if (daSlot) {
+          const rad =
+            next.length === 1
+              ? LINGMING_CHAMBER_BY_KEY[next]?.primaryAnchor ?? daSlot.radical
+              : daSlot.radical;
+          triggerCloud(daSlot.chamberKey, rad, 'hit', undefined, 16000);
+        }
+      }
       synth.playClick();
     } else {
       deleteBeforeCaret();
     }
-  }, [setLiveBuffer, clearCloud, deleteBeforeCaret]);
+  }, [setLiveBuffer, clearCloud, deleteBeforeCaret, scriptMode, triggerCloud]);
 
   const handleSpaceAction = useCallback(() => {
     const { buffer: curBuf, selectedIdx: curIdx } = liveRef.current;
@@ -1368,11 +1403,14 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
   const wordCount = useMemo(() => countWriterGlyphs(activeDraft.content), [activeDraft.content]);
   const isCompactViewport = vvBox.width < 640 || vvBox.height < 560;
   const cloudBoxPx = isCompactViewport
-    ? Math.max(220, Math.min(340, Math.round(Math.min(vvBox.width * 0.84, vvBox.height * 0.56))))
+    ? Math.max(240, Math.min(350, Math.round(Math.min(vvBox.width * 0.86, vvBox.height * 0.58))))
     : 460;
   const clampedCloudX = cloudAnchor
     ? Math.max(cloudBoxPx * 0.12, Math.min(vvBox.width - cloudBoxPx * 0.78, cloudAnchor.x))
     : vvBox.width * 0.38;
+  const clampedPalaceX = cloudAnchor
+    ? Math.max(24, Math.min(vvBox.width - cloudBoxPx * 0.48, cloudAnchor.x))
+    : vvBox.width * 0.42;
   const clampedCloudY = cloudAnchor
     ? Math.max(
         vvBox.offsetTop + cloudBoxPx * 0.34,
@@ -1586,24 +1624,9 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
 
                 <div className="flex flex-col gap-1.5 pt-2 border-t border-[var(--dojo-border)]">
                   <span className="text-[11px] text-[var(--dojo-text-sub)]">
-                    {t('推演形態')}
+                    {t('雲圖形態')}
                   </span>
                   <div className="grid grid-cols-2 gap-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        synth.playClick();
-                        if (!keystrokeCloudEnabled) setKeystrokeCloudEnabled(true);
-                        setCloudMode('evolving');
-                      }}
-                      className={`py-1 rounded text-[11px] border cursor-pointer ${
-                        cloudMode === 'evolving'
-                          ? 'bg-[var(--dojo-ochre-wash)] border-[var(--dojo-ochre)]/45 text-[var(--dojo-ochre)] font-medium'
-                          : 'bg-[var(--dojo-surface-inset)] border-[var(--dojo-border)] text-[var(--dojo-text-muted)] hover:text-[var(--dojo-text)]'
-                      }`}
-                    >
-                      {t('機率演化')}
-                    </button>
                     <button
                       type="button"
                       onClick={() => {
@@ -1619,30 +1642,43 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
                     >
                       {t('宮殿原圖')}
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        synth.playClick();
+                        if (!keystrokeCloudEnabled) setKeystrokeCloudEnabled(true);
+                        setCloudMode('evolving');
+                      }}
+                      className={`py-1 rounded text-[11px] border cursor-pointer ${
+                        cloudMode === 'evolving'
+                          ? 'bg-[var(--dojo-ochre-wash)] border-[var(--dojo-ochre)]/45 text-[var(--dojo-ochre)] font-medium'
+                          : 'bg-[var(--dojo-surface-inset)] border-[var(--dojo-border)] text-[var(--dojo-text-muted)] hover:text-[var(--dojo-text)]'
+                      }`}
+                    >
+                      {t('機率演化')}
+                    </button>
                   </div>
 
-                  {cloudMode === 'evolving' && (
-                    <div className="flex items-center justify-between pt-1 text-[11px]">
-                      <span className="text-[var(--dojo-text-sub)]">
-                        {t('計入簡碼推演')}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          synth.playClick();
-                          if (!keystrokeCloudEnabled) setKeystrokeCloudEnabled(true);
-                          setCloudIncludeShortCodes(!cloudIncludeShortCodes);
-                        }}
-                        className={`px-2 py-0.5 rounded border text-[11px] font-medium cursor-pointer ${
-                          cloudIncludeShortCodes
-                            ? 'bg-[var(--dojo-pine-wash)] border-[var(--dojo-pine)]/40 text-[var(--dojo-pine-text)]'
-                            : 'bg-[var(--dojo-surface-inset)] border-[var(--dojo-border)] text-[var(--dojo-text-muted)]'
-                        }`}
-                      >
-                        {t(cloudIncludeShortCodes ? '計入簡碼' : '純全碼')}
-                      </button>
-                    </div>
-                  )}
+                  <div className="flex items-center justify-between pt-1 text-[11px]">
+                    <span className="text-[var(--dojo-text-sub)]">
+                      {t('右翼簡碼提示')}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        synth.playClick();
+                        if (!keystrokeCloudEnabled) setKeystrokeCloudEnabled(true);
+                        setCloudIncludeShortCodes(!cloudIncludeShortCodes);
+                      }}
+                      className={`px-2 py-0.5 rounded border text-[11px] font-medium cursor-pointer ${
+                        cloudIncludeShortCodes
+                          ? 'bg-[var(--dojo-pine-wash)] border-[var(--dojo-pine)]/40 text-[var(--dojo-pine-text)]'
+                          : 'bg-[var(--dojo-surface-inset)] border-[var(--dojo-border)] text-[var(--dojo-text-muted)]'
+                      }`}
+                    >
+                      {t(cloudIncludeShortCodes ? '計入簡碼' : '純字根')}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="pt-2 border-t border-[var(--dojo-border)] flex flex-col gap-1.5">
@@ -1940,8 +1976,10 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
       {keystrokeCloudEnabled && cloudAnchor && cloudMode === 'palace' && cloudPulse.pulse && (
         <KeystrokePalaceCloud
           pulse={cloudPulse.pulse}
-          visible={cloudPulse.visible}
+          visible={Boolean(buffer) || cloudPulse.visible}
+          buffer={buffer}
           scriptMode={scriptMode}
+          includeShortCodes={cloudIncludeShortCodes}
           placement="coincident"
           boxPx={cloudBoxPx}
           opacityScale={cloudOpacity}
@@ -1949,9 +1987,9 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
           whisperMode
           style={{
             position: 'fixed',
-            left: `${clampedCloudX}px`,
+            left: `${clampedPalaceX}px`,
             top: `${clampedCloudY}px`,
-            transform: 'translate(-20%, -48%)',
+            transform: 'translate(-50%, -50%)',
             zIndex: 15,
           }}
         />

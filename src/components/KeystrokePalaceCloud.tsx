@@ -1,11 +1,13 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Cloud, CloudOff } from 'lucide-react';
 import { LINGMING_CHAMBER_BY_KEY } from '../data/lingming';
-import { ScriptMode } from '../data/scriptFilter';
+import { LINGMING_SHORT_CODES } from '../data/lingmingShortCodes';
+import { matchesScript, ScriptMode } from '../data/scriptFilter';
 import { useThemeMode } from '../data/theme';
 import { useUiText } from '../data/uiScript';
 import { KeystrokeCloudPulse, useKeystrokeCloud } from '../data/keystrokeCloud';
 import { synth } from '../audio/synth';
+import { lingmingLexicon } from '../engine/lingmingIme';
 import { StrokeCloudStage } from './StrokeCloudStage';
 import { RadicalSymbol } from './ColorSplitGlyph';
 
@@ -60,7 +62,10 @@ export const KeystrokeCloudToggle: React.FC<KeystrokeCloudToggleProps> = ({
 interface KeystrokePalaceCloudProps {
   pulse: KeystrokeCloudPulse | null;
   visible: boolean;
+  /** Active composing key sequence so right-wing short-code hints converge cleanly alongside the Palace */
+  buffer?: string;
   scriptMode?: ScriptMode;
+  includeShortCodes?: boolean;
   /**
    * - 'coincident': 100% target-overlapping Memory Palace cloud (anchorOnActive=true, variant="echo")
    *   centered mathematically on the target glyph so gaze never drifts away from the character.
@@ -90,10 +95,28 @@ const SIZE_MAP: Record<NonNullable<KeystrokePalaceCloudProps['size']>, number> =
   'coincident-lg': 460,
 };
 
+// Right-wing clockwise crescent outside the Memory Palace core so short codes never collide with radicals
+const SHORT_ARC_KEY1: ReadonlyArray<{ x: number; y: number }> = [
+  { x: 80.5, y: 31.5 },
+  { x: 85.0, y: 45.5 },
+  { x: 82.5, y: 59.5 },
+  { x: 75.5, y: 71.5 },
+];
+
+// Converges gently inward toward the caret focus (50, 50) when narrowed on Key 2+
+const SHORT_ARC_CONVERGE: ReadonlyArray<{ x: number; y: number }> = [
+  { x: 64.5, y: 43.5 },
+  { x: 72.5, y: 54.0 },
+  { x: 74.5, y: 65.5 },
+  { x: 68.5, y: 75.0 },
+];
+
 export const KeystrokePalaceCloud: React.FC<KeystrokePalaceCloudProps> = ({
   pulse,
   visible,
+  buffer = '',
   scriptMode = 'both',
+  includeShortCodes,
   placement = 'coincident',
   size = 'coincident',
   boxPx,
@@ -105,9 +128,58 @@ export const KeystrokePalaceCloud: React.FC<KeystrokePalaceCloudProps> = ({
 }) => {
   const t = useUiText();
   const isWash = useThemeMode() === 'wash';
-  const { opacity: ctxOpacity, blend: ctxBlend } = useKeystrokeCloud();
+  const {
+    opacity: ctxOpacity,
+    blend: ctxBlend,
+    includeShortCodes: ctxIncludeShortCodes,
+  } = useKeystrokeCloud();
   const effectiveOpacity = opacityScale ?? ctxOpacity;
   const effectiveBlend = blendStrength ?? ctxBlend;
+  const showShortCodes = includeShortCodes ?? ctxIncludeShortCodes;
+
+  const shortWingItems = useMemo(() => {
+    const buf = buffer.trim().toLowerCase();
+    if (!showShortCodes || !visible || !buf || /[aeiou]$/.test(buf)) {
+      return [];
+    }
+    const candidates = LINGMING_SHORT_CODES.filter(
+      (sc) =>
+        sc.shortCode.startsWith(buf) &&
+        sc.shortCode.length > buf.length &&
+        sc.char !== pulse?.activeChar
+    ).sort((a, b) => {
+      const aScript = matchesScript(
+        lingmingLexicon.byChar.get(a.char)?.script ?? 'common',
+        scriptMode
+      )
+        ? 1
+        : 0;
+      const bScript = matchesScript(
+        lingmingLexicon.byChar.get(b.char)?.script ?? 'common',
+        scriptMode
+      )
+        ? 1
+        : 0;
+      if (aScript !== bScript) return bScript - aScript;
+      if (a.level !== b.level) return a.level - b.level;
+      if (a.isCore50 !== b.isCore50) return a.isCore50 ? -1 : 1;
+      return 0;
+    });
+
+    const slots = buf.length === 1 ? SHORT_ARC_KEY1 : SHORT_ARC_CONVERGE;
+    const picked = candidates.slice(0, slots.length);
+    return picked.map((sc, idx) => {
+      const pt = slots[idx];
+      const weight = Math.max(0.32, 1 - idx * 0.18);
+      return {
+        char: sc.char,
+        x: pt.x,
+        y: pt.y,
+        weight,
+        isPrimary: idx === 0 && buf.length >= 2,
+      };
+    });
+  }, [buffer, showShortCodes, visible, pulse?.activeChar, scriptMode]);
 
   if (!pulse) return null;
 
@@ -124,17 +196,38 @@ export const KeystrokePalaceCloud: React.FC<KeystrokePalaceCloudProps> = ({
     const filterId = `ink-cloud-bleed-${pulse.chamberKey}-${pulse.tick}`;
     const macroFreq = (0.024 + (seed % 19) * 0.0014).toFixed(4);
     const grainFreq = (0.24 + (seed % 13) * 0.014).toFixed(3);
-    const dispScale = (1.2 + effectiveBlend * 7.4).toFixed(2);
-    const blurStd = (0.28 + effectiveBlend * 2.0).toFixed(2);
-    const haloSlope = (0.16 + effectiveBlend * 0.28).toFixed(2);
+    const dispScale = (1.0 + effectiveBlend * 5.8).toFixed(2);
+    const blurStd = (0.22 + effectiveBlend * 1.55).toFixed(2);
+    const haloSlope = (0.14 + effectiveBlend * 0.24).toFixed(2);
     // Dappled alpha matrix modulates ink density cleanly inside [grainBase .. 1.0]
-    const grainGain = (0.18 + effectiveBlend * 0.24).toFixed(2);
-    const grainBase = (0.68 - effectiveBlend * 0.34).toFixed(2);
-    const blendedAlpha = effectiveOpacity * (1 - effectiveBlend * 0.24);
-    const radialCoreStop = Math.round(34 - effectiveBlend * 14);
-    const radialMidStop = Math.round(58 - effectiveBlend * 10);
-    const radialOuterStop = Math.round(74 - effectiveBlend * 4);
-    const radialMask = `radial-gradient(circle at 50% 50%, rgba(0,0,0,1) ${radialCoreStop}%, rgba(0,0,0,0.48) ${radialMidStop}%, rgba(0,0,0,0) ${radialOuterStop}%)`;
+    const grainGain = (0.16 + effectiveBlend * 0.22).toFixed(2);
+    const grainBase = (0.72 - effectiveBlend * 0.30).toFixed(2);
+
+    // StrokeCloudStage(variant="echo") internally renders radicals at 0.14..0.44 alpha;
+    // scale the container alpha so default ~22% reads calmly with Huangting-Dojo legibility.
+    const stageAlpha = Math.min(0.95, Math.max(0.14, effectiveOpacity * 2.25 * (1 - effectiveBlend * 0.16)));
+
+    // Asymmetric directional field:
+    // Left of caret (0..44%) gently dissolves so already-written text stays crisp and unobstructed;
+    // Focal overlap point (50%, 50%) and right-extending Palace + short-code wing stay vivid.
+    const leftEdgeMinAlpha = (0.14 - effectiveBlend * 0.06).toFixed(2);
+    const leftFadeMask = `linear-gradient(90deg, rgba(0,0,0,${leftEdgeMinAlpha}) 0%, rgba(0,0,0,0.18) 28%, rgba(0,0,0,0.52) 42%, rgba(0,0,0,0.96) 47.5%, rgba(0,0,0,1) 52%, rgba(0,0,0,1) 100%)`;
+
+    const radialCoreStop = Math.round(44 - effectiveBlend * 10);
+    const radialMidStop = Math.round(70 - effectiveBlend * 8);
+    const radialOuterStop = Math.round(92 - effectiveBlend * 4);
+    const radialMask = `radial-gradient(ellipse 56% 52% at 54% 50%, rgba(0,0,0,1) ${radialCoreStop}%, rgba(0,0,0,0.56) ${radialMidStop}%, rgba(0,0,0,0) ${radialOuterStop}%)`;
+
+    const shortArcPath =
+      shortWingItems.length >= 2
+        ? `M 54 50 Q ${((54 + shortWingItems[0].x) / 2).toFixed(1)} ${(
+            (50 + shortWingItems[0].y) / 2 - 4
+          ).toFixed(1)} ${shortWingItems
+            .map((item) => `${item.x.toFixed(1)} ${item.y.toFixed(1)}`)
+            .join(' L ')}`
+        : shortWingItems.length === 1
+          ? `M 54 50 Q 60 ${(50 + shortWingItems[0].y) / 2 - 2} ${shortWingItems[0].x.toFixed(1)} ${shortWingItems[0].y.toFixed(1)}`
+          : '';
 
     return (
       <div
@@ -211,51 +304,109 @@ export const KeystrokePalaceCloud: React.FC<KeystrokePalaceCloudProps> = ({
           </defs>
         </svg>
 
+        {/* Outer directional mask clears the left wing over already-written characters */}
         <div
-          className="relative w-full h-full flex items-center justify-center rounded-full"
+          className="relative w-full h-full"
           style={{
-            opacity: visible ? blendedAlpha : 0,
-            transform: visible ? 'scale(1)' : 'scale(0.95)',
-            mixBlendMode: isWash ? 'multiply' : effectiveBlend >= 0.35 ? 'screen' : 'normal',
-            WebkitMaskImage: radialMask,
-            maskImage: radialMask,
-            transition: visible
-              ? 'opacity 220ms cubic-bezier(0.16, 1, 0.3, 1), transform 260ms cubic-bezier(0.16, 1, 0.3, 1)'
-              : 'opacity 480ms ease-out, transform 480ms ease-out',
-            background: isWash
-              ? `radial-gradient(circle at 50% 50%, rgba(28,28,26,${(0.03 + effectiveBlend * 0.03).toFixed(3)}) 0%, rgba(243,241,236,0) 64%)`
-              : `radial-gradient(circle at 50% 50%, rgba(160,175,198,${(0.025 + effectiveBlend * 0.025).toFixed(3)}) 0%, rgba(11,15,23,0) 64%)`,
+            WebkitMaskImage: leftFadeMask,
+            maskImage: leftFadeMask,
           }}
         >
-          <div className="w-full h-full" style={{ filter: `url(#${filterId})` }}>
-            <StrokeCloudStage
-              key={`${pulse.chamberKey}_${pulse.tick}`}
-              chamberKey={pulse.chamberKey}
-              activeChar={pulse.activeChar}
-              variant="echo"
-              scaffoldLevel={whisperMode ? 2 : 1}
-              anchorOnActive
-              scriptMode={scriptMode}
-            />
-          </div>
+          <div
+            className="relative w-full h-full flex items-center justify-center rounded-full"
+            style={{
+              opacity: visible ? stageAlpha : 0,
+              transform: visible ? 'scale(1)' : 'scale(0.96)',
+              mixBlendMode: isWash ? 'multiply' : effectiveBlend >= 0.35 ? 'screen' : 'normal',
+              WebkitMaskImage: radialMask,
+              maskImage: radialMask,
+              transition: visible
+                ? 'opacity 200ms cubic-bezier(0.16, 1, 0.3, 1), transform 240ms cubic-bezier(0.16, 1, 0.3, 1)'
+                : 'opacity 420ms ease-out, transform 420ms ease-out',
+              background: isWash
+                ? `radial-gradient(circle at 52% 50%, rgba(28,28,26,${(0.025 + effectiveBlend * 0.025).toFixed(3)}) 0%, rgba(243,241,236,0) 64%)`
+                : `radial-gradient(circle at 52% 50%, rgba(160,175,198,${(0.02 + effectiveBlend * 0.022).toFixed(3)}) 0%, rgba(11,15,23,0) 64%)`,
+            }}
+          >
+            <div className="w-full h-full relative" style={{ filter: `url(#${filterId})` }}>
+              <StrokeCloudStage
+                key={`${pulse.chamberKey}_${pulse.tick}`}
+                chamberKey={pulse.chamberKey}
+                activeChar={pulse.activeChar}
+                variant="echo"
+                scaffoldLevel={whisperMode ? 2 : 1}
+                anchorOnActive
+                scriptMode={scriptMode}
+              />
 
-          {!whisperMode && (
-            <div
-              className={`absolute top-2.5 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] whitespace-nowrap ${
-                isMiss
-                  ? 'text-[var(--dojo-crimson-text)]'
-                  : 'text-[var(--dojo-text-muted)]'
-              }`}
-            >
-              <span className="font-mono-tabular font-bold text-[var(--dojo-ochre)]">
-                {keyUpper}
-              </span>
-              <span className="font-display font-semibold">
-                {chamber.primaryAnchor}
-                {t('宮')}
-              </span>
+              {/* Harmonious clockwise right-wing short-code crescent (zero collision with Palace radicals) */}
+              {shortWingItems.length > 0 && (
+                <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
+                  {shortArcPath && (
+                    <svg
+                      viewBox="0 0 100 100"
+                      className="absolute inset-0 w-full h-full overflow-visible"
+                    >
+                      <path
+                        d={shortArcPath}
+                        fill="none"
+                        stroke={isWash ? '#7C4E1D' : '#D8B16A'}
+                        strokeWidth="0.36"
+                        strokeOpacity={0.24}
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  )}
+
+                  {shortWingItems.map((sc, idx) => {
+                    const sizePx = Math.round((isCoincident ? px * 0.044 : 18) * (0.8 + sc.weight * 0.28));
+                    return (
+                      <span
+                        key={`sc_${sc.char}`}
+                        className="absolute font-display leading-none select-none"
+                        style={{
+                          left: `${sc.x}%`,
+                          top: `${sc.y}%`,
+                          transform: 'translate(-50%, -50%)',
+                          fontSize: `${Math.max(14, Math.min(23, sizePx))}px`,
+                          color: isWash
+                            ? idx === 0
+                              ? '#5E3810'
+                              : '#8A6438'
+                            : idx === 0
+                              ? '#E8C988'
+                              : '#B29664',
+                          opacity: sc.isPrimary ? 0.78 : Math.max(0.28, sc.weight * 0.56),
+                          transition:
+                            'left 260ms cubic-bezier(0.22, 1, 0.36, 1), top 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 220ms ease',
+                        }}
+                      >
+                        {sc.char}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          )}
+
+            {!whisperMode && (
+              <div
+                className={`absolute top-2.5 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] whitespace-nowrap ${
+                  isMiss
+                    ? 'text-[var(--dojo-crimson-text)]'
+                    : 'text-[var(--dojo-text-muted)]'
+                }`}
+              >
+                <span className="font-mono-tabular font-bold text-[var(--dojo-ochre)]">
+                  {keyUpper}
+                </span>
+                <span className="font-display font-semibold">
+                  {chamber.primaryAnchor}
+                  {t('宮')}
+                </span>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     );
