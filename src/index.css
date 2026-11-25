@@ -4,7 +4,7 @@
 
 @layer base {
   :root {
-    --font-display: 'Noto Serif TC', 'Source Han Serif TC', 'Songti TC', 'PMingLiU', 'SimSun', Georgia, serif;
+    --font-display: 'Noto Serif TC', 'Noto Serif SC', 'Source Han Serif TC', 'Source Han Serif SC', 'Songti TC', 'Songti SC', 'STSong', 'Noto Serif CJK TC', 'Noto Serif CJK SC', Georgia, serif;
     --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'PingFang TC', 'PingFang SC', 'Microsoft JhengHei', 'Microsoft YaHei', sans-serif;
     --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
 
@@ -72,6 +72,10 @@
 
 .font-display {
   font-family: var(--font-display);
+}
+
+:root[lang="zh-Hans"] {
+  --font-display: 'Noto Serif SC', 'Noto Serif TC', 'Source Han Serif SC', 'Source Han Serif TC', 'Songti SC', 'Songti TC', 'STSong', 'Noto Serif CJK SC', 'Noto Serif CJK TC', Georgia, serif;
 }
 
 .font-mono-tabular {

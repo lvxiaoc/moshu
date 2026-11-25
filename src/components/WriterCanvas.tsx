@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Check,
   Cloud,
@@ -20,6 +20,10 @@ import {
   mapChinesePunctuation,
   resolveImeDaSlot,
 } from '../engine/lingmingIme';
+import {
+  resolveLeadShortCodeCandidate,
+  resolveLeadStructuralGlyph,
+} from '../engine/evolvingCloud';
 import { LINGMING_CHAMBER_BY_KEY } from '../data/lingming';
 import { useKeystrokeCloud, useKeystrokeCloudPulse } from '../data/keystrokeCloud';
 import { SCRIPT_MODE_OPTIONS, ScriptMode } from '../data/scriptFilter';
@@ -214,28 +218,92 @@ function getParagraphOffsetFromPoint(
   return acc;
 }
 
-// Progressive depth-of-field styling modeled after 黃庭抄經閣:
-// active paragraph stays razor-sharp; surrounding paragraphs recede smoothly with depth.
-function getParagraphDepthStyle(distance: number, scrolledAway: boolean): React.CSSProperties {
+function lerpRgbTuple(
+  a: [number, number, number],
+  b: [number, number, number],
+  t: number
+): string {
+  const k = Math.max(0, Math.min(1, t));
+  const r = Math.round(a[0] + (b[0] - a[0]) * k);
+  const g = Math.round(a[1] + (b[1] - a[1]) * k);
+  const bl = Math.round(a[2] + (b[2] - a[2]) * k);
+  return `rgb(${r}, ${g}, ${bl})`;
+}
+
+// Horizontal distance chromaticity, opacity & gentle optical fade away from the centered target
+function getHorizontalGlyphStyle(
+  distFromTarget: number,
+  maxVisible: number,
+  isWash: boolean,
+  extraDim = 1
+): React.CSSProperties {
+  const t = Math.min(1, Math.max(0, distFromTarget - 1) / Math.max(1, maxVisible));
+  const color = isWash
+    ? t < 0.55
+      ? lerpRgbTuple([20, 20, 19], [108, 106, 98], t / 0.55)
+      : lerpRgbTuple([108, 106, 98], [196, 193, 184], (t - 0.55) / 0.45)
+    : t < 0.55
+      ? lerpRgbTuple([242, 238, 230], [150, 162, 184], t / 0.55)
+      : lerpRgbTuple([150, 162, 184], [52, 66, 90], (t - 0.55) / 0.45);
+  const opacity = Number(Math.max(0.02, Math.pow(1 - t, 1.48) * 0.94 * extraDim).toFixed(3));
+  const blurPx =
+    distFromTarget <= 4 ? 0 : Number(Math.min(1.35, (distFromTarget - 4) * 0.14).toFixed(2));
+  return {
+    color,
+    opacity,
+    filter: blurPx > 0 ? `blur(${blurPx}px)` : 'none',
+    transition: 'color 220ms ease, opacity 220ms ease, filter 220ms ease',
+  };
+}
+
+// Progressive depth-of-field + perspective scale recession for surrounding lines:
+// active focal line stays crisp at center; newline pushes previous lines upward in smaller size & softer focus.
+function getParagraphDepthStyle(
+  distance: number,
+  scrolledAway: boolean,
+  isAbove: boolean
+): React.CSSProperties {
   if (distance === 0) {
-    return { opacity: 1, filter: 'none' };
+    return { opacity: 1, filter: 'none', transform: 'scale(1)' };
   }
   if (scrolledAway) {
     return {
       opacity: Math.max(0.55, 1 - distance * 0.08),
       filter: 'none',
+      transform: 'scale(1)',
     };
   }
+  const transformOrigin = isAbove ? 'center bottom' : 'center top';
   if (distance === 1) {
-    return { opacity: 0.62, filter: 'none' };
+    return {
+      opacity: 0.48,
+      filter: 'blur(0.45px)',
+      transform: 'scale(0.82)',
+      transformOrigin,
+    };
   }
   if (distance === 2) {
-    return { opacity: 0.36, filter: 'blur(0.35px)' };
+    return {
+      opacity: 0.25,
+      filter: 'blur(1.1px)',
+      transform: 'scale(0.68)',
+      transformOrigin,
+    };
   }
   if (distance === 3) {
-    return { opacity: 0.2, filter: 'blur(0.75px)' };
+    return {
+      opacity: 0.12,
+      filter: 'blur(1.85px)',
+      transform: 'scale(0.58)',
+      transformOrigin,
+    };
   }
-  return { opacity: 0.11, filter: 'blur(1.15px)' };
+  return {
+    opacity: 0.05,
+    filter: 'blur(2.5px)',
+    transform: 'scale(0.5)',
+    transformOrigin,
+  };
 }
 
 export const WriterCanvas: React.FC<WriterCanvasProps> = ({
@@ -306,6 +374,10 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const focalRuleRef = useRef<HTMLDivElement | null>(null);
   const caretMarkerRef = useRef<HTMLSpanElement | null>(null);
+  const beforeTapeRef = useRef<HTMLDivElement | null>(null);
+  const prevBeforeWidthRef = useRef<number>(0);
+  const prevParaIdxRef = useRef<number>(0);
+  const prevScrolledAwayRef = useRef<boolean>(false);
   const inputSinkRef = useRef<HTMLTextAreaElement | null>(null);
   const isAutoScrollingRef = useRef<boolean>(false);
   const userScrolledAwayRef = useRef<boolean>(false);
@@ -467,12 +539,16 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
     }
   }, [imeQuery.all.length, selectedIdx]);
 
-  // Snap active caret line onto the lower-middle focal baseline
+  // Snap active caret line onto the centered focal plane
   const syncCloudAnchorFromMarker = useCallback((rect: DOMRect) => {
+    const marker = caretMarkerRef.current;
+    const isCenteredFocal = marker?.dataset.centeredFocal === 'true';
     const hasComposingGlyph = Boolean(liveRef.current.buffer) && rect.width > 8;
-    const centerX = hasComposingGlyph
-      ? rect.left + Math.min(11, rect.width * 0.44)
-      : rect.left;
+    const centerX = isCenteredFocal
+      ? rect.left + rect.width / 2
+      : hasComposingGlyph
+        ? rect.left + Math.min(18, rect.width * 0.44)
+        : rect.left + 12;
     setCloudAnchor({
       x: centerX,
       y: rect.top + rect.height / 2,
@@ -520,7 +596,9 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
     activeDraft.id,
     caretPos,
     buffer,
+    scrolledAway,
     vvBox.height,
+    vvBox.width,
     showSoftKeyboard,
     snapCaretToFocalBaseline,
     syncCloudAnchorFromMarker,
@@ -652,6 +730,23 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
       const { buffer: curBuf } = liveRef.current;
       if (!curBuf) return;
       const res = lingmingLexicon.query(curBuf, scriptMode, 7);
+
+      // Lower-right 45° short-code priority on Space when user has not explicitly picked a candidate
+      // and no exact full character has superseded the short-code prefix.
+      if (idx === 0 && cloudIncludeShortCodes) {
+        const hasExactNonRadical = res.exact.some((c) => !c.entry.isRadical);
+        if (!hasExactNonRadical) {
+          const shortLead = resolveLeadShortCodeCandidate(curBuf, scriptMode);
+          if (shortLead) {
+            synth.playKeyHit(curBuf.length || 1, true);
+            pulseCommittedCloud(shortLead.char);
+            insertTextAtCaret(shortLead.char);
+            setLiveBuffer('', 0);
+            return;
+          }
+        }
+      }
+
       const cand = res.all[idx] ?? res.all[0];
       if (cand) {
         synth.playKeyHit(curBuf.length || 1, true);
@@ -662,7 +757,7 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
       }
       setLiveBuffer('', 0);
     },
-    [scriptMode, insertTextAtCaret, setLiveBuffer, pulseCommittedCloud]
+    [scriptMode, cloudIncludeShortCodes, insertTextAtCaret, setLiveBuffer, pulseCommittedCloud]
   );
 
   const moveCaretLine = useCallback((dir: -1 | 1) => {
@@ -1377,46 +1472,93 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
     return { paragraphSlices: out, activeParaIdx: foundIdx };
   }, [activeDraft.content, caretPos]);
 
-  // Subtle inline preview glyph at caret: prioritize structural radicals -> full-code progression;
-  // short-code words sit in the CW spiral and replace the target slot cleanly on Space.
+  // Smooth carriage-glide animation whenever written text grows/shrinks on the left of the centered target
+  const activeBeforeLength = useMemo(() => {
+    const activePara = paragraphSlices[activeParaIdx];
+    if (!activePara) return 0;
+    return Math.max(0, Math.min(activePara.text.length, caretPos - activePara.start));
+  }, [paragraphSlices, activeParaIdx, caretPos]);
+
+  useLayoutEffect(() => {
+    const tapeEl = beforeTapeRef.current;
+    if (!tapeEl) {
+      prevBeforeWidthRef.current = 0;
+      prevParaIdxRef.current = activeParaIdx;
+      prevScrolledAwayRef.current = scrolledAway;
+      return;
+    }
+
+    const newWidth = tapeEl.scrollWidth;
+    const canGlide =
+      !scrolledAway &&
+      !prevScrolledAwayRef.current &&
+      prevParaIdxRef.current === activeParaIdx;
+
+    if (canGlide) {
+      const delta = newWidth - prevBeforeWidthRef.current;
+      if (Math.abs(delta) > 1 && Math.abs(delta) < 220) {
+        let activeTx = 0;
+        try {
+          const computed = window.getComputedStyle(tapeEl).transform;
+          if (computed && computed !== 'none') {
+            activeTx = new DOMMatrix(computed).m41 || 0;
+          }
+        } catch {
+          activeTx = 0;
+        }
+        tapeEl.getAnimations().forEach((anim) => anim.cancel());
+        tapeEl.animate(
+          [
+            { transform: `translateX(${(activeTx + delta).toFixed(1)}px)` },
+            { transform: 'translateX(0px)' },
+          ],
+          {
+            duration: 210,
+            easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+          }
+        );
+      }
+    }
+
+    prevBeforeWidthRef.current = newWidth;
+    prevParaIdxRef.current = activeParaIdx;
+    prevScrolledAwayRef.current = scrolledAway;
+  }, [activeBeforeLength, activeDraft.content, activeParaIdx, scrolledAway]);
+
+  // Inline preview glyph at caret (`主目標字`): centered as the unwavering focal anchor;
+  // approaching short codes glide along the lower-right depth corridor and commit cleanly on Space.
   const inlineGhostChar = useMemo(() => {
     if (!buffer) return null;
-    if (selectedIdx > 0) {
-      const picked = imeQuery.all[selectedIdx];
-      if (picked) return picked.entry.char;
-    }
-    if (buffer.length === 1) {
-      const chamber = LINGMING_CHAMBER_BY_KEY[buffer];
-      if (chamber) return chamber.primaryAnchor;
-    } else {
-      const exactFull = imeQuery.exact.find((c) => c.matchedBy === 'full');
-      if (exactFull) return exactFull.entry.char;
-      const structural = imeQuery.all.find(
-        (c) => c.matchedBy !== 'short' && c.entry.code.startsWith(buffer)
-      );
-      if (structural) return structural.entry.char;
-    }
-    const top = imeQuery.exact[0] ?? imeQuery.all[0];
-    return top ? top.entry.char : null;
-  }, [buffer, imeQuery.exact, imeQuery.all, selectedIdx]);
+    return resolveLeadStructuralGlyph(buffer, scriptMode, selectedIdx);
+  }, [buffer, scriptMode, selectedIdx]);
 
   const wordCount = useMemo(() => countWriterGlyphs(activeDraft.content), [activeDraft.content]);
   const isCompactViewport = vvBox.width < 640 || vvBox.height < 560;
+  const targetGlyphPx = isCompactViewport ? 36 : 52;
   const cloudBoxPx = isCompactViewport
     ? Math.max(240, Math.min(350, Math.round(Math.min(vvBox.width * 0.86, vvBox.height * 0.58))))
     : 460;
-  const clampedCloudX = cloudAnchor
-    ? Math.max(cloudBoxPx * 0.12, Math.min(vvBox.width - cloudBoxPx * 0.78, cloudAnchor.x))
-    : vvBox.width * 0.38;
+
+  // Upper-right Key-1 Palace cloud + 3D depth corridors project purely rightward from the centered target
+  const clampedRayX = cloudAnchor
+    ? Math.max(20, Math.min(vvBox.width - targetGlyphPx * 4.5, cloudAnchor.x))
+    : vvBox.width * 0.5;
+  const clampedRayY = cloudAnchor
+    ? Math.max(
+        vvBox.offsetTop + targetGlyphPx * 3.8,
+        Math.min(vvBox.offsetTop + vvBox.height - targetGlyphPx * 2.4, cloudAnchor.y)
+      )
+    : vvBox.offsetTop + vvBox.height * 0.5;
+
   const clampedPalaceX = cloudAnchor
     ? Math.max(24, Math.min(vvBox.width - cloudBoxPx * 0.48, cloudAnchor.x))
-    : vvBox.width * 0.42;
-  const clampedCloudY = cloudAnchor
+    : vvBox.width * 0.5;
+  const clampedPalaceY = cloudAnchor
     ? Math.max(
         vvBox.offsetTop + cloudBoxPx * 0.34,
         Math.min(vvBox.offsetTop + vvBox.height - cloudBoxPx * 0.36, cloudAnchor.y)
       )
-    : vvBox.offsetTop + vvBox.height * 0.64;
+    : vvBox.offsetTop + vvBox.height * 0.5;
 
   const cloudOpacityPct = Math.round(cloudOpacity * 100);
   const cloudBlendPct = Math.round(cloudBlend * 100);
@@ -1655,13 +1797,13 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
                           : 'bg-[var(--dojo-surface-inset)] border-[var(--dojo-border)] text-[var(--dojo-text-muted)] hover:text-[var(--dojo-text)]'
                       }`}
                     >
-                      {t('機率演化')}
+                      {t('透視射線')}
                     </button>
                   </div>
 
                   <div className="flex items-center justify-between pt-1 text-[11px]">
                     <span className="text-[var(--dojo-text-sub)]">
-                      {t('右翼簡碼提示')}
+                      {t('右下簡碼')}
                     </span>
                     <button
                       type="button"
@@ -1952,22 +2094,21 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
         </div>
       )}
 
-      {/* Whisper-faint Background Keystroke Cloud arranged to the right of the written text */}
+      {/* Dual 45° Perspective Rays anchored cleanly at target glyph center */}
       {keystrokeCloudEnabled && cloudAnchor && cloudMode === 'evolving' && (
         <EvolvingProbCloud
           buffer={buffer}
           committedChar={committedCloud?.char ?? null}
           committedTick={committedCloud?.tick ?? 0}
+          glyphPx={targetGlyphPx}
           scriptMode={scriptMode}
           includeShortCodes={cloudIncludeShortCodes}
-          boxPx={cloudBoxPx}
           opacityScale={cloudOpacity}
           blendStrength={cloudBlend}
           style={{
             position: 'fixed',
-            left: `${clampedCloudX}px`,
-            top: `${clampedCloudY}px`,
-            transform: 'translate(-14%, -46%)',
+            left: `${clampedRayX}px`,
+            top: `${clampedRayY}px`,
             zIndex: 15,
           }}
         />
@@ -1988,7 +2129,7 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
           style={{
             position: 'fixed',
             left: `${clampedPalaceX}px`,
-            top: `${clampedCloudY}px`,
+            top: `${clampedPalaceY}px`,
             transform: 'translate(-50%, -50%)',
             zIndex: 15,
           }}
@@ -2027,13 +2168,13 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
             setScrolledAway(true);
           }
         }}
-        className="relative z-20 flex-1 min-h-0 overflow-y-auto px-5 sm:px-10"
+        className="relative z-20 flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 sm:px-8"
       >
         <div
-          className={`max-w-[580px] mx-auto pb-3 ${
+          className={`w-full mx-auto pb-16 ${
             showSoftKeyboard || vvBox.height < 560
               ? 'pt-[44vh]'
-              : 'pt-[74vh]'
+              : 'pt-[50vh]'
           }`}
         >
           {paragraphSlices.map((p, idx) => {
@@ -2041,7 +2182,165 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
             const beforeText = p.hasCaret ? p.text.slice(0, localCaret) : p.text;
             const afterText = p.hasCaret ? p.text.slice(localCaret) : '';
             const dist = Math.abs(idx - activeParaIdx);
-            const depthStyle = getParagraphDepthStyle(dist, scrolledAway);
+            const depthStyle = getParagraphDepthStyle(dist, scrolledAway, idx < activeParaIdx);
+            const isComposingTarget = Boolean(buffer && inlineGhostChar);
+
+            // Focus Mode active line: target glyph locked dead-center horizontally;
+            // written text slides smoothly leftward with distance chromatic/opacity fade.
+            if (p.hasCaret && !scrolledAway) {
+              const allBeforeChars = Array.from(beforeText);
+              const maxLeftRender = isCompactViewport ? 11 : 18;
+              const maxLeftFade = isCompactViewport ? 6.5 : 13.5;
+              const omittedLeftCount = Math.max(0, allBeforeChars.length - maxLeftRender);
+              const visibleBeforeChars = allBeforeChars.slice(omittedLeftCount);
+
+              let leftCursorOffset = 0;
+              for (let k = 0; k < omittedLeftCount; k++) {
+                leftCursorOffset += allBeforeChars[k].length;
+              }
+
+              const allAfterChars = Array.from(afterText);
+              const maxRightRender = isCompactViewport ? 6 : 12;
+              const visibleAfterChars = allAfterChars.slice(0, maxRightRender);
+
+              const slotGap = isComposingTarget
+                ? isCompactViewport
+                  ? 'calc(50% + 28px)'
+                  : 'calc(50% + 40px)'
+                : 'calc(50% + 10px)';
+
+              return (
+                <div
+                  key={`p_${idx}`}
+                  data-para-start={p.start}
+                  style={depthStyle}
+                  onMouseUp={(e) => {
+                    if (window.getSelection()?.toString()) return;
+                    const charEl = (e.target as HTMLElement | null)?.closest('[data-char-offset]');
+                    if (charEl) {
+                      const offsetAttr = Number((charEl as HTMLElement).dataset.charOffset);
+                      if (!Number.isNaN(offsetAttr)) {
+                        const nextPos = Math.max(p.start, Math.min(p.end, offsetAttr));
+                        liveRef.current.caretPos = nextPos;
+                        setCaretPos(nextPos);
+                        focusSink();
+                        return;
+                      }
+                    }
+                    focusSink();
+                  }}
+                  className="relative w-full h-[2.3em] sm:h-[2.25em] font-display text-[22px] sm:text-[32px] leading-[1.86] sm:leading-[1.92] tracking-[0.14em] sm:tracking-[0.18em] cursor-text overflow-visible"
+                >
+                  {/* Written characters sliding smoothly leftward with chromatic & depth fade */}
+                  {visibleBeforeChars.length > 0 && (
+                    <div
+                      className="absolute top-0 bottom-0 left-0 flex items-center justify-end overflow-hidden"
+                      style={{
+                        right: slotGap,
+                        transition: 'right 180ms cubic-bezier(0.22, 1, 0.36, 1)',
+                        WebkitMaskImage:
+                          'linear-gradient(90deg, rgba(0,0,0,0) 0%, rgba(0,0,0,1) 24%, rgba(0,0,0,1) 100%)',
+                        maskImage:
+                          'linear-gradient(90deg, rgba(0,0,0,0) 0%, rgba(0,0,0,1) 24%, rgba(0,0,0,1) 100%)',
+                      }}
+                    >
+                      <div
+                        ref={beforeTapeRef}
+                        className="inline-flex items-center whitespace-nowrap"
+                      >
+                        {visibleBeforeChars.map((ch, i) => {
+                          const charGlobalOffset = p.start + leftCursorOffset;
+                          leftCursorOffset += ch.length;
+                          const distFromTarget = visibleBeforeChars.length - i;
+                          const glyphStyle = getHorizontalGlyphStyle(
+                            distFromTarget,
+                            maxLeftFade,
+                            isWash
+                          );
+                          return (
+                            <span
+                              key={`bl_${omittedLeftCount + i}`}
+                              data-char-offset={charGlobalOffset}
+                              style={glyphStyle}
+                              className="inline-block whitespace-pre"
+                            >
+                              {ch}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Centered focal target glyph & subtle cursor matching original 黃庭抄經閣 scale */}
+                  <span
+                    ref={caretMarkerRef}
+                    data-centered-focal="true"
+                    data-ignored-caret="true"
+                    className="absolute left-1/2 -translate-x-1/2 top-0 bottom-0 inline-flex items-center justify-center"
+                  >
+                    {isComposingTarget ? (
+                      <span className="relative inline-flex items-center justify-center px-2 py-1 rounded-xl bg-white/[0.03] wash:bg-black/[0.035]">
+                        <span className="font-display font-medium text-[36px] sm:text-[52px] leading-none text-[var(--dojo-ochre)]">
+                          {inlineGhostChar}
+                        </span>
+                        <span
+                          aria-hidden="true"
+                          className="writer-caret-blink absolute -right-[5px] top-1/2 -translate-y-1/2 w-[2px] h-[0.72em] rounded-full bg-[var(--dojo-ochre)]/80"
+                        />
+                      </span>
+                    ) : (
+                      <span
+                        aria-hidden="true"
+                        className="writer-caret-blink inline-block w-[2px] h-[1.15em] rounded-full bg-[var(--dojo-ochre)]"
+                      />
+                    )}
+                  </span>
+
+                  {/* Characters after caret (when editing mid-line) */}
+                  {visibleAfterChars.length > 0 && (
+                    <div
+                      className="absolute top-0 bottom-0 right-0 flex items-center justify-start overflow-hidden"
+                      style={{
+                        left: slotGap,
+                        transition: 'left 180ms cubic-bezier(0.22, 1, 0.36, 1)',
+                        WebkitMaskImage:
+                          'linear-gradient(270deg, rgba(0,0,0,0) 0%, rgba(0,0,0,1) 28%, rgba(0,0,0,1) 100%)',
+                        maskImage:
+                          'linear-gradient(270deg, rgba(0,0,0,0) 0%, rgba(0,0,0,1) 28%, rgba(0,0,0,1) 100%)',
+                      }}
+                    >
+                      <div className="inline-flex items-center whitespace-nowrap">
+                        {(() => {
+                          let rightOffset = p.start + localCaret;
+                          return visibleAfterChars.map((ch, i) => {
+                            const charGlobalOffset = rightOffset;
+                            rightOffset += ch.length;
+                            const distFromTarget = i + 1;
+                            const glyphStyle = getHorizontalGlyphStyle(
+                              distFromTarget,
+                              maxRightRender,
+                              isWash,
+                              buffer ? 0.28 : 0.72
+                            );
+                            return (
+                              <span
+                                key={`ar_${i}`}
+                                data-char-offset={charGlobalOffset}
+                                style={glyphStyle}
+                                className="inline-block whitespace-pre"
+                              >
+                                {ch}
+                              </span>
+                            );
+                          });
+                        })()}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            }
 
             return (
               <p
@@ -2058,11 +2357,15 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
                   if (localOffset !== null) {
                     const nextPos = Math.max(p.start, Math.min(p.end, p.start + localOffset));
                     liveRef.current.caretPos = nextPos;
+                    userScrolledAwayRef.current = false;
+                    setScrolledAway(false);
                     setCaretPos(nextPos);
                   }
                   focusSink();
                 }}
-                className="font-display text-[19px] sm:text-[22px] leading-[1.92] sm:leading-[2] tracking-[0.02em] text-[var(--dojo-text-bright)] whitespace-pre-wrap break-words min-h-[1.92em] cursor-text transition-[opacity,filter] duration-300"
+                className={`mx-auto font-display text-[22px] sm:text-[32px] leading-[1.86] sm:leading-[1.92] tracking-[0.12em] sm:tracking-[0.16em] text-[var(--dojo-text-bright)] whitespace-pre-wrap break-words min-h-[1.86em] cursor-text transition-[opacity,filter,transform] duration-300 ${
+                  scrolledAway ? 'max-w-[680px]' : 'max-w-[600px] text-center'
+                }`}
               >
                 {p.hasCaret ? (
                   <>
@@ -2074,7 +2377,7 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
                     >
                       {buffer && inlineGhostChar && (
                         <span className="inline-flex items-baseline mx-[1px]">
-                          <span className="font-display text-[19px] sm:text-[22px] text-[var(--dojo-ochre)]/80 underline decoration-[var(--dojo-ochre)]/45 underline-offset-4">
+                          <span className="font-display text-[24px] sm:text-[32px] leading-[1.86] sm:leading-[1.92] text-[var(--dojo-ochre)]/82 underline decoration-[var(--dojo-ochre)]/45 underline-offset-[6px]">
                             {inlineGhostChar}
                           </span>
                         </span>
@@ -2097,20 +2400,20 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
         </div>
       </div>
 
-      {/* Lower-Middle Focal Anchor Space (no bottom candidate bar — pure blind typing) */}
+      {/* Centered Focal Anchor Space (minimal distraction while typing) */}
       <div className="shrink-0 relative z-30 flex flex-col">
         <div
-          className={`max-w-[580px] mx-auto w-full px-5 sm:px-10 ${
-            showSoftKeyboard || isCompactViewport ? 'pb-1.5' : 'pb-[22vh]'
+          className={`max-w-[680px] mx-auto w-full px-5 sm:px-10 ${
+            showSoftKeyboard || isCompactViewport ? 'pb-1.5' : 'pb-[44vh]'
           }`}
         >
-          {/* Quiet baseline hair-rule sitting under the active writing line */}
+          {/* Quiet anchor rule visible only when controls or reread mode are active */}
           <div
             ref={focalRuleRef}
             className={`w-full h-px transition-opacity duration-300 ${
               chromeVisible || scrolledAway
-                ? 'bg-[var(--dojo-border-strong)]/45'
-                : 'bg-[var(--dojo-border)]/20'
+                ? 'bg-[var(--dojo-border-strong)]/35 opacity-100'
+                : 'bg-transparent opacity-0'
             }`}
           />
 
@@ -2145,7 +2448,7 @@ export const WriterCanvas: React.FC<WriterCanvasProps> = ({
         )}
         <div
           onMouseEnter={() => wakeChrome()}
-          className={`max-w-[580px] mx-auto w-full px-5 sm:px-10 flex items-center justify-between gap-2 text-[11px] transition-opacity duration-300 ${
+          className={`max-w-[680px] mx-auto w-full px-5 sm:px-10 flex items-center justify-between gap-2 text-[11px] transition-opacity duration-300 ${
             showSoftKeyboard ? 'pb-1.5' : 'pb-[max(12px,env(safe-area-inset-bottom))]'
           } ${chromeVisible ? 'opacity-85' : 'opacity-0 pointer-events-none'}`}
         >

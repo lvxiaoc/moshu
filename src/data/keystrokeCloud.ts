@@ -10,12 +10,12 @@ import { PALACE_PDF_CHAMBERS } from './palacePdfData';
 const STORAGE_KEY = 'inkkey_keystroke_cloud_v1';
 const OPACITY_STORAGE_KEY = 'inkkey_keystroke_cloud_opacity_v1';
 const BLEND_STORAGE_KEY = 'inkkey_keystroke_cloud_blend_v1';
-const MODE_STORAGE_KEY = 'inkkey_keystroke_cloud_mode_v2';
+const MODE_STORAGE_KEY = 'inkkey_keystroke_cloud_mode_v3';
 const SHORT_CODES_STORAGE_KEY = 'inkkey_keystroke_cloud_short_codes_v1';
-export const DEFAULT_CLOUD_OPACITY = 0.22;
-export const DEFAULT_CLOUD_BLEND = 0.65;
+export const DEFAULT_CLOUD_OPACITY = 0.28;
+export const DEFAULT_CLOUD_BLEND = 0.55;
 export type CloudRenderMode = 'evolving' | 'palace';
-export const DEFAULT_CLOUD_MODE: CloudRenderMode = 'palace';
+export const DEFAULT_CLOUD_MODE: CloudRenderMode = 'evolving';
 export const DEFAULT_CLOUD_INCLUDE_SHORT_CODES = true;
 
 export function loadKeystrokeCloudEnabled(): boolean {
